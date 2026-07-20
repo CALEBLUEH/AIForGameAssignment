@@ -18,6 +18,7 @@ public class AutoCombatAI : MonoBehaviour
 
     private CombatUnit unit;
     private NavMeshAgent agent;
+    private SquadMember squadMember;
 
     private float nextAttackTime;
     private float nextTargetSearchTime;
@@ -28,7 +29,10 @@ public class AutoCombatAI : MonoBehaviour
         unit = GetComponent<CombatUnit>();
         agent = GetComponent<NavMeshAgent>();
 
-        // We rotate the character ourselves.
+        // Only squad members have this component.
+        squadMember = GetComponent<SquadMember>();
+
+        // Rotation is handled by this script.
         agent.updateRotation = false;
     }
 
@@ -37,6 +41,14 @@ public class AutoCombatAI : MonoBehaviour
         if (unit.IsDead)
         {
             StopMoving();
+            return;
+        }
+
+        // Returning to the leader has higher priority than combat.
+        if (ShouldReturnToLeader())
+        {
+            ReturnToLeader();
+            currentState = "Returning to Leader";
             return;
         }
 
@@ -63,6 +75,58 @@ public class AutoCombatAI : MonoBehaviour
             AttackTarget();
             currentState = "Attacking";
         }
+    }
+
+    private bool ShouldReturnToLeader()
+    {
+        if (squadMember == null)
+        {
+            return false;
+        }
+
+        return squadMember.IsTooFarFromLeader();
+    }
+
+    private void ReturnToLeader()
+    {
+        if (squadMember == null || squadMember.leader == null)
+        {
+            return;
+        }
+
+        // Ignore the enemy while returning.
+        currentTarget = null;
+
+        if (!agent.isOnNavMesh)
+        {
+            return;
+        }
+
+        float distanceToLeader = Vector3.Distance(
+            transform.position,
+            squadMember.leader.position
+        );
+
+        if (distanceToLeader <= squadMember.returnDistance)
+        {
+            StopMoving();
+            return;
+        }
+
+        if (Time.time >= nextPathUpdateTime)
+        {
+            agent.isStopped = false;
+            agent.stoppingDistance = squadMember.returnDistance;
+
+            agent.SetDestination(
+                squadMember.leader.position
+            );
+
+            nextPathUpdateTime =
+                Time.time + pathUpdateInterval;
+        }
+
+        FaceMovementDirection();
     }
 
     private void SearchForTargetWhenNeeded()
@@ -99,6 +163,7 @@ public class AutoCombatAI : MonoBehaviour
             {
                 continue;
             }
+            
 
             if (possibleTarget.IsDead)
             {
@@ -109,6 +174,18 @@ public class AutoCombatAI : MonoBehaviour
             {
                 continue;
             }
+            if (squadMember != null)
+{
+    bool enemyIsInsideCombatArea =
+        squadMember.IsEnemyInsideLeaderCombatArea(
+            possibleTarget
+        );
+
+    if (!enemyIsInsideCombatArea)
+    {
+        continue;
+    }
+}
 
             Vector3 difference =
                 possibleTarget.transform.position -
@@ -187,31 +264,31 @@ public class AutoCombatAI : MonoBehaviour
 
     private void FaceMovementDirection()
     {
-        Vector3 movementDirection = agent.desiredVelocity;
-        movementDirection.y = 0f;
+        Vector3 direction = agent.desiredVelocity;
+        direction.y = 0f;
 
-        if (movementDirection.sqrMagnitude < 0.001f)
+        if (direction.sqrMagnitude < 0.001f)
         {
             return;
         }
 
-        RotateTowards(movementDirection.normalized);
+        RotateTowards(direction.normalized);
     }
 
     private void FaceTarget()
     {
-        Vector3 targetDirection =
+        Vector3 direction =
             currentTarget.transform.position -
             transform.position;
 
-        targetDirection.y = 0f;
+        direction.y = 0f;
 
-        if (targetDirection.sqrMagnitude < 0.001f)
+        if (direction.sqrMagnitude < 0.001f)
         {
             return;
         }
 
-        RotateTowards(targetDirection.normalized);
+        RotateTowards(direction.normalized);
     }
 
     private void RotateTowards(Vector3 direction)
