@@ -1,333 +1,169 @@
 using UnityEngine;
 using UnityEngine.AI;
 
+// Uses NavMesh.CalculatePath and Transform movement; never requires NavMeshAgent.
 [RequireComponent(typeof(CombatUnit))]
-[RequireComponent(typeof(NavMeshAgent))]
 public class AutoCombatAI : MonoBehaviour
 {
-    [Header("Movement")]
-    public float rotationSpeed = 10f;
-
-    [Header("AI Timing")]
-    public float targetSearchInterval = 0.25f;
-    public float pathUpdateInterval = 0.2f;
-
-    [Header("Runtime")]
+    public enum MovementKind { Charge, Dash, Flash }
+    public enum CharacterSkillKind { PowerUp, Burst, Heal }
+    public float rotationSpeed = 10f, movementSpeed = 3.5f;
+    public float targetSearchInterval = 0.25f, pathUpdateInterval = 0.35f;
+    public LayerMask sightBlockers;
+    public MovementKind movementKind;
+    public CharacterSkillKind characterSkillKind;
+    public float movementRange = 7f, movementCost = 35f, characterSkillCost = 40f, skillRange = 6f;
+    [Header("Automatic action set")]
+    public int basicAttacksBeforeFinisher = 2;
+    public float finisherMultiplier = 1.5f;
     [SerializeField] private CombatUnit currentTarget;
     [SerializeField] private string currentState = "Waiting";
-
     private CombatUnit unit;
-    private NavMeshAgent agent;
-    private SquadMember squadMember;
-
-    private float nextAttackTime;
-    private float nextTargetSearchTime;
-    private float nextPathUpdateTime;
-
+    private SquadMember member;
+    private NavMeshPath path;
+    private int corner;
+    private float nextAttack, nextSearch, nextPath;
+    private int actionIndex;
+    private bool returning, skillMoving;
+    private Vector3 skillDestination;
+    private float skillSpeed;
+    public string CurrentState => currentState;
+    public CombatUnit Unit => unit;
     private void Awake()
     {
         unit = GetComponent<CombatUnit>();
-        agent = GetComponent<NavMeshAgent>();
-
-        // Only squad members have this component.
-        squadMember = GetComponent<SquadMember>();
-
-        // Rotation is handled by this script.
-        agent.updateRotation = false;
+        member = GetComponent<SquadMember>();
+        path = new NavMeshPath();
     }
-
     private void Update()
     {
-        if (unit.IsDead)
+        if (unit.IsDead) { currentState = "Down"; return; }
+        if (BattleDirector.Instance != null && !BattleDirector.Instance.IsPlaying) return;
+        if (skillMoving)
         {
-            StopMoving();
+            Move(skillSpeed);
+            if (Distance(transform.position, skillDestination) < 0.25f || !HasPath())
+            { skillMoving = false; currentState = "Waiting"; }
             return;
         }
-
-        // Returning to the leader has higher priority than combat.
-        if (ShouldReturnToLeader())
+        if (member != null && member.IsTooFarFromLeader() && Time.time >= nextAttack) returning = true;
+        if (returning && member != null && !member.HasReturnedToLeader())
         {
-            ReturnToLeader();
-            currentState = "Returning to Leader";
+            currentState = "Returning";
+            Navigate(member.leader.position, member.returnDistance);
+            Move(movementSpeed);
             return;
         }
-
-        SearchForTargetWhenNeeded();
-
-        if (!IsTargetValid())
+        returning = false;
+        if (Time.time >= nextSearch || currentTarget == null || currentTarget.IsDead)
+        { FindTarget(); nextSearch = Time.time + targetSearchInterval; }
+        if (currentTarget == null) { ClearPath(); currentState = "Waiting"; return; }
+        if (Distance(transform.position, currentTarget.transform.position) <= unit.AttackRange && HasSight(currentTarget))
         {
-            StopMoving();
-            currentState = "Waiting";
-            return;
-        }
-
-        float distanceToTarget = GetDistanceToTarget();
-
-        if (distanceToTarget > unit.attackRange)
-        {
-            MoveTowardsTarget();
-            currentState = "Moving";
+            ClearPath(); Face(currentTarget.transform.position - transform.position);
+            currentState = "Attacking";
+            if (Time.time >= nextAttack)
+            {
+                bool finisher = actionIndex >= basicAttacksBeforeFinisher;
+                currentTarget.TakeDamage(unit.AttackPower * (finisher ? finisherMultiplier : 1f),
+                    transform.position);
+                actionIndex = finisher ? 0 : actionIndex + 1;
+                currentState = finisher ? "Finisher" : "Basic attack";
+                nextAttack = Time.time + 1f / Mathf.Max(0.1f, unit.AttackSpeed);
+            }
         }
         else
         {
-            StopMoving();
-            FaceTarget();
-            AttackTarget();
-            currentState = "Attacking";
+            currentState = "Pursuing";
+            Navigate(currentTarget.transform.position, unit.AttackRange * 0.8f);
+            Move(movementSpeed);
         }
     }
-
-    private bool ShouldReturnToLeader()
+    private void FindTarget()
     {
-        if (squadMember == null)
-        {
-            return false;
-        }
-
-        return squadMember.IsTooFarFromLeader();
-    }
-
-    private void ReturnToLeader()
-    {
-        if (squadMember == null || squadMember.leader == null)
-        {
-            return;
-        }
-
-        // Ignore the enemy while returning.
         currentTarget = null;
-
-        if (!agent.isOnNavMesh)
+        float best = float.PositiveInfinity;
+        foreach (var candidate in FindObjectsByType<CombatUnit>(FindObjectsSortMode.None))
         {
-            return;
-        }
-
-        float distanceToLeader = Vector3.Distance(
-            transform.position,
-            squadMember.leader.position
-        );
-
-        if (distanceToLeader <= squadMember.returnDistance)
-        {
-            StopMoving();
-            return;
-        }
-
-        if (Time.time >= nextPathUpdateTime)
-        {
-            agent.isStopped = false;
-            agent.stoppingDistance = squadMember.returnDistance;
-
-            agent.SetDestination(
-                squadMember.leader.position
-            );
-
-            nextPathUpdateTime =
-                Time.time + pathUpdateInterval;
-        }
-
-        FaceMovementDirection();
-    }
-
-    private void SearchForTargetWhenNeeded()
-    {
-        bool targetIsMissing =
-            currentTarget == null ||
-            currentTarget.IsDead;
-
-        if (!targetIsMissing &&
-            Time.time < nextTargetSearchTime)
-        {
-            return;
-        }
-
-        FindNearestEnemy();
-
-        nextTargetSearchTime =
-            Time.time + targetSearchInterval;
-    }
-
-    private void FindNearestEnemy()
-    {
-        CombatUnit[] allUnits =
-            FindObjectsByType<CombatUnit>(
-                FindObjectsSortMode.None
-            );
-
-        CombatUnit nearestEnemy = null;
-        float nearestDistanceSquared = Mathf.Infinity;
-
-        foreach (CombatUnit possibleTarget in allUnits)
-        {
-            if (possibleTarget == unit)
-            {
-                continue;
-            }
-            
-
-            if (possibleTarget.IsDead)
-            {
-                continue;
-            }
-
-            if (possibleTarget.team == unit.team)
-            {
-                continue;
-            }
-            if (squadMember != null)
-{
-    bool enemyIsInsideCombatArea =
-        squadMember.IsEnemyInsideLeaderCombatArea(
-            possibleTarget
-        );
-
-    if (!enemyIsInsideCombatArea)
-    {
-        continue;
-    }
-}
-
-            Vector3 difference =
-                possibleTarget.transform.position -
-                transform.position;
-
-            difference.y = 0f;
-
-            float distanceSquared =
-                difference.sqrMagnitude;
-
-            if (distanceSquared < nearestDistanceSquared)
-            {
-                nearestDistanceSquared = distanceSquared;
-                nearestEnemy = possibleTarget;
-            }
-        }
-
-        currentTarget = nearestEnemy;
-    }
-
-    private bool IsTargetValid()
-    {
-        return currentTarget != null &&
-               !currentTarget.IsDead &&
-               currentTarget.team != unit.team;
-    }
-
-    private float GetDistanceToTarget()
-    {
-        Vector3 difference =
-            currentTarget.transform.position -
-            transform.position;
-
-        difference.y = 0f;
-
-        return difference.magnitude;
-    }
-
-    private void MoveTowardsTarget()
-    {
-        if (!agent.isOnNavMesh)
-        {
-            return;
-        }
-
-        if (Time.time >= nextPathUpdateTime)
-        {
-            agent.isStopped = false;
-            agent.stoppingDistance = unit.attackRange * 0.9f;
-
-            agent.SetDestination(
-                currentTarget.transform.position
-            );
-
-            nextPathUpdateTime =
-                Time.time + pathUpdateInterval;
-        }
-
-        FaceMovementDirection();
-    }
-
-    private void StopMoving()
-    {
-        if (!agent.isOnNavMesh)
-        {
-            return;
-        }
-
-        agent.isStopped = true;
-
-        if (agent.hasPath)
-        {
-            agent.ResetPath();
+            if (candidate == unit || candidate.IsDead || candidate.team == unit.team) continue;
+            float distance = Distance(transform.position, candidate.transform.position);
+            if (distance < best) { best = distance; currentTarget = candidate; }
         }
     }
-
-    private void FaceMovementDirection()
+    private bool HasSight(CombatUnit target) =>
+        !Physics.Linecast(transform.position + Vector3.up, target.transform.position + Vector3.up,
+            sightBlockers, QueryTriggerInteraction.Ignore);
+    private void Navigate(Vector3 destination, float stopDistance)
     {
-        Vector3 direction = agent.desiredVelocity;
+        if (Distance(transform.position, destination) <= stopDistance) { ClearPath(); return; }
+        if (Time.time < nextPath && HasPath()) return;
+        nextPath = Time.time + pathUpdateInterval;
+        if (!NavMesh.SamplePosition(transform.position, out var start, 2f, NavMesh.AllAreas) ||
+            !NavMesh.SamplePosition(destination, out var end, 2f, NavMesh.AllAreas) ||
+            !NavMesh.CalculatePath(start.position, end.position, NavMesh.AllAreas, path) ||
+            path.status != NavMeshPathStatus.PathComplete)
+        { ClearPath(); currentState = "No path"; return; }
+        corner = path.corners.Length > 1 ? 1 : 0;
+    }
+    private bool HasPath() => path != null && path.corners != null && corner < path.corners.Length;
+    private void Move(float speed)
+    {
+        if (!HasPath()) return;
+        Vector3 delta = path.corners[corner] - transform.position; delta.y = 0f;
+        if (delta.sqrMagnitude < 0.04f) { corner++; return; }
+        Vector3 step = delta.normalized * Mathf.Min(speed * Time.deltaTime, delta.magnitude);
+        transform.position += step; Face(step);
+    }
+    private void Face(Vector3 direction)
+    {
         direction.y = 0f;
-
-        if (direction.sqrMagnitude < 0.001f)
-        {
-            return;
-        }
-
-        RotateTowards(direction.normalized);
+        if (direction.sqrMagnitude > 0.001f)
+            transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(direction),
+                rotationSpeed * Time.deltaTime);
     }
-
-    private void FaceTarget()
+    private void ClearPath() { if (path != null) path.ClearCorners(); corner = 0; }
+    public bool TryMovementSkill(Vector3 destination)
     {
-        Vector3 direction =
-            currentTarget.transform.position -
-            transform.position;
-
-        direction.y = 0f;
-
-        if (direction.sqrMagnitude < 0.001f)
-        {
-            return;
-        }
-
-        RotateTowards(direction.normalized);
+        if (unit.IsDead || !unit.SpendMovementPoints(movementCost)) return false;
+        Vector3 delta = destination - transform.position; delta.y = 0f;
+        destination = transform.position + Vector3.ClampMagnitude(delta, movementRange);
+        if (!NavMesh.SamplePosition(destination, out var hit, 2f, NavMesh.AllAreas))
+        { unit.RefundMovementPoints(movementCost); return false; }
+        if (movementKind == MovementKind.Flash)
+        { transform.position = hit.position; ClearPath(); currentState = "Flashed"; return true; }
+        if (movementKind == MovementKind.Dash &&
+            Physics.Linecast(transform.position + Vector3.up, hit.position + Vector3.up, sightBlockers))
+        { unit.RefundMovementPoints(movementCost); return false; }
+        nextPath = 0f; Navigate(hit.position, 0f);
+        if (!HasPath()) { unit.RefundMovementPoints(movementCost); return false; }
+        skillDestination = hit.position;
+        skillSpeed = movementKind == MovementKind.Charge ? 12f : 18f;
+        skillMoving = true; currentState = movementKind.ToString();
+        return true;
     }
-
-    private void RotateTowards(Vector3 direction)
+    public bool TryCharacterSkill(CombatUnit target)
     {
-        Quaternion targetRotation =
-            Quaternion.LookRotation(direction);
-
-        transform.rotation = Quaternion.Slerp(
-            transform.rotation,
-            targetRotation,
-            rotationSpeed * Time.deltaTime
-        );
-    }
-
-    private void AttackTarget()
-    {
-        if (Time.time < nextAttackTime)
+        if (unit.IsDead || BattleDirector.Instance == null ||
+            !BattleDirector.Instance.TrySpendUniversal(characterSkillCost)) return false;
+        bool used = true;
+        switch (characterSkillKind)
         {
-            return;
+            case CharacterSkillKind.PowerUp:
+                unit.AddTimedModifier(CombatUnit.Stat.Attack, 12f, 0.2f, 8f); break;
+            case CharacterSkillKind.Burst:
+                used = target != null && !target.IsDead && target.team != unit.team &&
+                    Distance(transform.position, target.transform.position) <= skillRange;
+                if (used) target.TakeDamage(unit.AttackPower * 2.5f, transform.position);
+                break;
+            case CharacterSkillKind.Heal:
+                used = target != null && !target.IsDead && target.team == unit.team &&
+                    Distance(transform.position, target.transform.position) <= skillRange;
+                if (used) target.Heal(35f);
+                break;
         }
-
-        if (!IsTargetValid())
-        {
-            return;
-        }
-
-        currentTarget.TakeDamage(unit.attackPower);
-
-        float attackInterval =
-            1f / Mathf.Max(0.01f, unit.attackSpeed);
-
-        nextAttackTime =
-            Time.time + attackInterval;
-
-        Debug.DrawLine(
-            transform.position + Vector3.up,
-            currentTarget.transform.position + Vector3.up,
-            Color.red,
-            0.3f
-        );
+        if (!used) BattleDirector.Instance.RefundUniversal(characterSkillCost);
+        return used;
     }
+    private static float Distance(Vector3 a, Vector3 b)
+    { a.y = b.y = 0f; return Vector3.Distance(a, b); }
 }
