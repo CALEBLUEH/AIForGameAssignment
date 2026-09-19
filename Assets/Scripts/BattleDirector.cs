@@ -9,9 +9,11 @@ public class BattleDirector : MonoBehaviour
     public static BattleDirector Instance { get; private set; }
     [Header("Canvas references")]
     public GameObject setupPanel, battlePanel, resultPanel;
-    public Text setupText, statusText, squadText, resultText;
+    public Text setupText, statusText, squadText, resultText, timerText, enemyText, energyText;
+    public Image[] energySegments;
     public Button[] setupButtons, squadButtons;
     public Button leaderButton, startButton, moveButton, skillButton, healButton, coverButton, restartButton;
+    public Button pauseButton, speedButton, autoButton;
     [Header("Stage")]
     public float universalCapacity = 100f, universalRegeneration = 8f;
     public float healCost = 25f, coverCost = 35f;
@@ -25,15 +27,20 @@ public class BattleDirector : MonoBehaviour
     private int leaderIndex, selectedIndex, wave = 1;
     private float elapsed;
     private bool timedSpawned, secondWaveSpawned, finished;
+    private bool paused;
+    private int speedLevel = 1;
+    [SerializeField] private bool autoEnabled = true;
     private GameObject enemyTemplate;
     private enum TargetMode { None, Move, Skill, Cover }
     private TargetMode targetMode;
     public bool IsPlaying => isPlaying;
     public float UniversalPoints => universalPoints;
+    public bool AutoEnabled => autoEnabled;
 
     private void Awake()
     {
         Instance = this;
+        Time.timeScale = 1f;
         universalPoints = universalCapacity;
         foreach (var ai in FindObjectsByType<AutoCombatAI>(FindObjectsSortMode.None))
         {
@@ -71,6 +78,9 @@ public class BattleDirector : MonoBehaviour
         skillButton.onClick.AddListener(UseCharacterSkill);
         healButton.onClick.AddListener(UseHeal);
         coverButton.onClick.AddListener(() => targetMode = TargetMode.Cover);
+        if (pauseButton != null) pauseButton.onClick.AddListener(TogglePause);
+        if (speedButton != null) speedButton.onClick.AddListener(CycleSpeed);
+        if (autoButton != null) autoButton.onClick.AddListener(ToggleAuto);
         restartButton.onClick.AddListener(() => UnityEngine.SceneManagement.SceneManager.LoadScene(
             UnityEngine.SceneManagement.SceneManager.GetActiveScene().buildIndex));
     }
@@ -229,8 +239,21 @@ public class BattleDirector : MonoBehaviour
 
     private void RefreshBattle()
     {
+        int enemies = CountAlive(CombatUnit.CombatTeam.Enemy);
         statusText.text = "ASSAULT  •  Wave " + wave + "  •  Enemies " + CountAlive(CombatUnit.CombatTeam.Enemy) +
             "  •  Universal " + Mathf.FloorToInt(universalPoints) + "/" + universalCapacity;
+        if (timerText != null) timerText.text = Mathf.FloorToInt(elapsed / 60f).ToString("00") + ":" +
+            Mathf.FloorToInt(elapsed % 60f).ToString("00");
+        if (enemyText != null) enemyText.text = enemies.ToString();
+        if (energyText != null) energyText.text = Mathf.FloorToInt(universalPoints).ToString();
+        if (energySegments != null)
+        {
+            float filled = universalPoints / Mathf.Max(1f, universalCapacity) * energySegments.Length;
+            for (int i = 0; i < energySegments.Length; i++)
+                energySegments[i].color = i < filled
+                    ? new Color(0.12f, 0.78f, 0.96f, 1f)
+                    : new Color(0.14f, 0.19f, 0.29f, 0.9f);
+        }
         if (Selected != null)
         {
             var unit = Selected.Unit;
@@ -244,11 +267,43 @@ public class BattleDirector : MonoBehaviour
                 (i == selectedIndex ? "▶ " : "") + squad[i].name;
     }
 
+    private void TogglePause()
+    {
+        paused = !paused;
+        Time.timeScale = paused ? 0f : speedLevel;
+        if (pauseButton != null) pauseButton.GetComponent<Image>().color =
+            paused ? new Color(0.55f, 0.72f, 0.82f, 1f) : Color.white;
+        SetButtonCaption(pauseButton, paused ? "▶" : "");
+    }
+
+    private void CycleSpeed()
+    {
+        speedLevel = speedLevel == 1 ? 2 : 1;
+        if (!paused) Time.timeScale = speedLevel;
+        SetButtonCaption(speedButton, speedLevel + "x");
+    }
+
+    private void ToggleAuto()
+    {
+        autoEnabled = !autoEnabled;
+        if (autoButton != null) autoButton.GetComponent<Image>().color =
+            autoEnabled ? Color.white : new Color(0.45f, 0.48f, 0.52f, 1f);
+        SetButtonCaption(autoButton, autoEnabled ? "AUTO" : "MANUAL");
+    }
+
+    private static void SetButtonCaption(Button button, string caption)
+    {
+        if (button == null) return;
+        Text label = button.GetComponentInChildren<Text>();
+        if (label != null) label.text = caption;
+    }
+
     private void Finish(bool won)
     {
         if (finished) return;
         finished = true;
         isPlaying = false;
+        Time.timeScale = 1f;
         resultText.text = won ? "VICTORY\nThe assault is complete." : "DEFEAT\nYour squad has fallen.";
         battlePanel.SetActive(false);
         resultPanel.SetActive(true);

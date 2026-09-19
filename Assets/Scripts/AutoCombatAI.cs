@@ -46,6 +46,12 @@ public class AutoCombatAI : MonoBehaviour
             { skillMoving = false; currentState = "Waiting"; }
             return;
         }
+        if (unit.team == CombatUnit.CombatTeam.Player && BattleDirector.Instance != null &&
+            !BattleDirector.Instance.AutoEnabled)
+        {
+            currentState = "Manual";
+            return;
+        }
         if (member != null && member.IsTooFarFromLeader() && Time.time >= nextAttack) returning = true;
         if (returning && member != null && !member.HasReturnedToLeader())
         {
