@@ -8,6 +8,7 @@ public class AutoCombatAI : MonoBehaviour
     public enum MovementKind { Charge, Dash, Flash }
     public enum CharacterSkillKind { PowerUp, Burst, Heal, Defensive, LowCostAOE, HighCostAOE }
     public enum CombatRole { Enemy, YuukaTank, AyaneHealer, MikaSingleTarget, MomoiLowCostAOE, HinaHighCostAOE }
+    public enum CoverPreference { Never, Low, Normal, High }
 
     [Header("Identity and movement")]
     public CombatRole role;
@@ -22,6 +23,11 @@ public class AutoCombatAI : MonoBehaviour
     public float separationDistance = 1.35f;
     public float separationStrength = 0.7f;
     [Header("Cover")]
+    [Tooltip("How strongly this character prefers usable cover. Yuuka/Tank should normally use Low; backline units can use High.")]
+    public CoverPreference coverPreference = CoverPreference.Normal;
+    [Tooltip("If enabled, this unit behaves as a frontline unit and will not take ordinary cover unless its health is at or below the threshold below.")]
+    public bool frontlineUnit = false;
+    [Range(0.05f, 1f)] public float frontlineCoverHealthThreshold = 0.40f;
     public float coverDetectionRange = 12f;
     public float coverRetryDelay = 2f;
     public float coverFiringRangeMultiplier = 1.15f;
@@ -36,6 +42,15 @@ public class AutoCombatAI : MonoBehaviour
     public int aoeMinimumEnemyCount = 2;
     public int expensiveAoeMinimumEnemyCount = 3;
     public float autoDecisionInterval = 0.4f;
+    [Header("Enemy engagement")]
+    [Tooltip("Enemies stay at their spawn/guard position until a player enters this range.")]
+    public float enemyDetectionRange = 14f;
+    [Tooltip("Maximum distance an enemy may chase away from its spawn position before returning.")]
+    public float enemyLeashRange = 22f;
+    [Tooltip("How close the enemy must get to its spawn point before it finishes returning.")]
+    public float enemyReturnRadius = 0.75f;
+    [Tooltip("After detecting a player, keep aggro for this many seconds after they leave detection range, unless the leash is exceeded.")]
+    public float enemyAggroMemory = 2f;
     [Header("Enemy status ability")]
     public StatusEffectSpec[] selfAbilityEffects;
     public StatusEffectSpec[] targetAbilityEffects;
@@ -61,6 +76,11 @@ public class AutoCombatAI : MonoBehaviour
     private CoverPoint coverPoint;
     private CoverPoint rejectedCoverPoint;
     private float rejectedCoverUntil;
+    private Vector3 losRepositionPoint;
+    private float losRepositionValidUntil;
+    private Vector3 enemySpawnPosition;
+    private bool enemyAggro;
+    private float enemyLastSeenTime;
     public string CurrentState => currentState;
     public CombatUnit Unit => unit;
     public float MovementCooldownRemaining => Mathf.Max(0f, movementReadyAt - Time.time);
@@ -71,12 +91,28 @@ public class AutoCombatAI : MonoBehaviour
         unit = GetComponent<CombatUnit>();
         member = GetComponent<SquadMember>();
         path = new NavMeshPath();
+
+        // Role is authoritative: Yuuka cannot accidentally hide because of Inspector settings.
+        if (role == CombatRole.YuukaTank)
+        {
+            frontlineUnit = true;
+            coverPreference = CoverPreference.Never;
+        }
+    }
+
+    private void Start()
+    {
+        // Keep the real Transform on the same NavMesh position used by CalculatePath.
+        if (NavMesh.SamplePosition(transform.position, out var hit, 2f, NavMesh.AllAreas))
+            transform.position = hit.position;
+        enemySpawnPosition = transform.position;
     }
 
     private void Update()
     {
         if (unit.IsDead) { currentState = "Down"; return; }
         if (BattleDirector.Instance != null && !BattleDirector.Instance.IsPlaying) return;
+        if (unit.team == CombatUnit.CombatTeam.Enemy && !UpdateEnemyEngagement()) return;
         if (skillMoving)
         {
             Move(skillSpeed, false);
@@ -84,10 +120,15 @@ public class AutoCombatAI : MonoBehaviour
             { skillMoving = false; currentState = "Waiting"; }
             return;
         }
-        bool playerAuto = unit.team != CombatUnit.CombatTeam.Player || BattleDirector.Instance == null ||
+        // Auto toggle controls tactical decisions only. Basic combat AI must always run:
+        // target acquisition, pursuit/repositioning, separation and basic attacks.
+        bool tacticalAuto = unit.team != CombatUnit.CombatTeam.Player || BattleDirector.Instance == null ||
             BattleDirector.Instance.AutoEnabled;
-        if (!playerAuto) { currentState = "Manual"; return; }
-        if (member != null && member.IsTooFarFromLeader() && Time.time >= nextAttack) returning = true;
+        // Valid cover has higher priority than formation return. The leader radius is a leash,
+        // not a command for everyone to stack on the leader's position.
+        bool hasReservedCover = coverPoint != null && coverPoint.IsReservedBy(unit);
+        if (!hasReservedCover && member != null && member.IsTooFarFromLeader() && Time.time >= nextAttack)
+            returning = true;
         if (returning && member != null && !member.HasReturnedToLeader())
         {
             currentState = "Returning";
@@ -105,10 +146,16 @@ public class AutoCombatAI : MonoBehaviour
         if (Time.time >= nextAutoDecision)
         {
             nextAutoDecision = Time.time + autoDecisionInterval;
-            if (unit.team == CombatUnit.CombatTeam.Player && TryAutoTacticalAction()) return;
+            // Player tactical actions (skills, auto movement, healing/defense decisions)
+            // only run while Auto is enabled. Enemy abilities remain automatic.
+            if (unit.team == CombatUnit.CombatTeam.Player && tacticalAuto && TryAutoTacticalAction()) return;
             if (unit.team == CombatUnit.CombatTeam.Enemy && TryEnemyAbility()) return;
         }
-        if (unit.team == CombatUnit.CombatTeam.Player && HandleCover()) return;
+
+        // Cover is normal combat positioning, so it works with Auto ON or OFF.
+        // Frontline/low-cover units are allowed to keep advancing instead of hiding with the backline.
+        if (unit.team == CombatUnit.CombatTeam.Player && ShouldUseCover() && HandleCover()) return;
+        if (unit.team == CombatUnit.CombatTeam.Player && !ShouldUseCover() && coverPoint != null) ReleaseCover();
         bool inRange = Distance(transform.position, currentTarget.transform.position) <= unit.AttackRange;
         bool hasSight = HasSight(currentTarget);
         if (inRange && hasSight)
@@ -126,10 +173,77 @@ public class AutoCombatAI : MonoBehaviour
         }
         else
         {
-            currentState = inRange ? "Repositioning for line of sight" : "Pursuing";
-            Navigate(currentTarget.transform.position, hasSight ? unit.AttackRange * 0.8f : 0.2f);
+            if (!hasSight && IsSightBlockedByBlockingObstacle(transform.position, currentTarget))
+            {
+                currentState = "Avoiding visual obstacle";
+                if (Time.time >= losRepositionValidUntil || !IsGoodFiringPosition(losRepositionPoint, currentTarget))
+                {
+                    if (TryFindLineOfSightPosition(currentTarget, out var firingPoint))
+                    {
+                        losRepositionPoint = firingPoint;
+                        losRepositionValidUntil = Time.time + 1.25f;
+                        ClearPath();
+                        nextPath = 0f;
+                    }
+                    else
+                    {
+                        // Fall back to normal NavMesh pursuit if no firing point can be found yet.
+                        losRepositionPoint = currentTarget.transform.position;
+                        losRepositionValidUntil = Time.time + 0.35f;
+                    }
+                }
+                Navigate(losRepositionPoint, 0.2f);
+            }
+            else
+            {
+                currentState = inRange ? "Repositioning for line of sight" : "Pursuing";
+                Navigate(currentTarget.transform.position, hasSight ? unit.AttackRange * 0.8f : 0.2f);
+            }
             Move(movementSpeed, true);
         }
+    }
+
+    private bool UpdateEnemyEngagement()
+    {
+        CombatUnit nearestPlayer = null;
+        float nearestDistance = float.PositiveInfinity;
+
+        foreach (CombatUnit candidate in FindObjectsByType<CombatUnit>(FindObjectsSortMode.None))
+        {
+            if (candidate == null || candidate.IsDead || candidate.team == unit.team) continue;
+            float d = Distance(transform.position, candidate.transform.position);
+            if (d < nearestDistance)
+            {
+                nearestDistance = d;
+                nearestPlayer = candidate;
+            }
+        }
+
+        // Before activation, stay in this wave position.
+        if (!enemyAggro)
+        {
+            if (nearestPlayer == null || nearestDistance > enemyDetectionRange)
+            {
+                ClearPath();
+                currentState = "Guarding";
+                return false;
+            }
+
+            enemyAggro = true;
+        }
+
+        // Once activated, never leash/return to the original area.
+        if (nearestPlayer == null)
+        {
+            currentTarget = null;
+            ClearPath();
+            currentState = "No target";
+            return false;
+        }
+
+        currentTarget = nearestPlayer;
+        enemyLastSeenTime = Time.time;
+        return true;
     }
 
     private bool TryAutoTacticalAction()
@@ -206,7 +320,8 @@ public class AutoCombatAI : MonoBehaviour
     private bool TryEnemyAbility()
     {
         if (Time.time < enemyAbilityReadyAt || currentTarget == null ||
-            Distance(transform.position, currentTarget.transform.position) > enemyAbilityRange) return false;
+            Distance(transform.position, currentTarget.transform.position) > enemyAbilityRange ||
+            !HasSight(currentTarget)) return false;
         bool used = ApplyCycledEffect(unit, selfAbilityEffects);
         used |= ApplyCycledEffect(currentTarget, targetAbilityEffects);
         if (allyAbilityEffects != null && allyAbilityEffects.Length > 0)
@@ -234,40 +349,126 @@ public class AutoCombatAI : MonoBehaviour
         return true;
     }
 
+
+    private bool ShouldUseCover()
+    {
+        // Yuuka/tank NEVER uses cover. This does not depend on an Inspector checkbox.
+        if (role == CombatRole.YuukaTank || frontlineUnit) return false;
+        if (coverPreference == CoverPreference.Never) return false;
+
+        switch (coverPreference)
+        {
+            case CoverPreference.Low:
+                return unit.HealthRatio <= Mathf.Max(frontlineCoverHealthThreshold, 0.55f);
+            case CoverPreference.High:
+            case CoverPreference.Normal:
+                return true;
+            default:
+                return false;
+        }
+    }
+
     private bool HandleCover()
     {
+        if (currentTarget == null) return false;
+
+        float coverAttackRange = unit.AttackRange * Mathf.Max(1f, coverFiringRangeMultiplier);
+
+        // Already reserved/using cover.
         if (coverPoint != null)
         {
-            if (!coverPoint.TryReserve(unit)) { coverPoint = null; return false; }
-            if (Distance(transform.position, coverPoint.transform.position) > 0.4f)
+            if (!coverPoint.TryReserve(unit))
             {
-                currentState = "Taking cover"; Navigate(coverPoint.transform.position, 0.15f); Move(movementSpeed, true); return true;
+                coverPoint = null;
+                return false;
             }
+
+            // Re-check the EXACT cover position every frame. If the enemy moved too far away,
+            // abandon/reject this point BEFORE normal pursuit is allowed to run.
+            float enemyDistanceFromCover = Distance(coverPoint.transform.position, currentTarget.transform.position);
+            if (enemyDistanceFromCover > coverAttackRange ||
+                !coverPoint.ProtectsFrom(currentTarget.transform.position) ||
+                !HasSightFromCover(coverPoint.transform.position, currentTarget, coverPoint.coverCollider))
+            {
+                RejectCurrentCover();
+                currentState = "Leaving invalid cover";
+                return false;
+            }
+
+            if (Distance(transform.position, coverPoint.transform.position) > coverPoint.occupancyRadius)
+            {
+                currentState = "Taking cover";
+                Navigate(coverPoint.transform.position, Mathf.Max(0.1f, coverPoint.occupancyRadius * 0.45f));
+                Move(movementSpeed, true);
+                return true;
+            }
+
+            // COMMIT to this fighting position. Do not fall through into normal Pursuing logic.
             coverPoint.Occupy(unit);
-            if (Distance(transform.position, currentTarget.transform.position) <= unit.AttackRange && HasSight(currentTarget)) return false;
-            RejectCurrentCover();
-            return false;
+            ClearPath();
+            ApplyIdleSeparation();
+            Face(currentTarget.transform.position - transform.position);
+            currentState = "Fighting from cover";
+
+            if (Time.time >= nextAttack)
+            {
+                bool finisher = actionIndex >= basicAttacksBeforeFinisher;
+                currentTarget.TakeDamage(unit.AttackPower * (finisher ? finisherMultiplier : 1f), transform.position);
+                actionIndex = finisher ? 0 : actionIndex + 1;
+                currentState = finisher ? "Cover finisher" : "Cover attack";
+                nextAttack = Time.time + 1f / Mathf.Max(0.1f, unit.AttackSpeed);
+            }
+
+            return true;
         }
-        float targetDistance = Distance(transform.position, currentTarget.transform.position);
-        if (targetDistance <= unit.AttackRange) return false;
-        Vector3 towardEnemy = (currentTarget.transform.position - transform.position).normalized;
+
         CoverPoint best = null;
-        float bestDistance = coverDetectionRange;
+        float bestScore = float.PositiveInfinity;
+        float currentEnemyDistance = Distance(transform.position, currentTarget.transform.position);
+
         foreach (CoverPoint candidate in CoverPoint.All)
         {
-            if (!candidate.IsAvailable) continue;
+            if (candidate == null) continue;
+            if (!candidate.IsAvailable && !candidate.IsReservedBy(unit)) continue;
             if (candidate == rejectedCoverPoint && Time.time < rejectedCoverUntil) continue;
-            Vector3 toCover = candidate.transform.position - transform.position; toCover.y = 0f;
-            float distance = toCover.magnitude;
-            if (distance >= bestDistance || Vector3.Dot(towardEnemy, toCover.normalized) < 0.2f) continue;
-            if (Distance(candidate.transform.position, currentTarget.transform.position) >= targetDistance) continue;
-            if (Distance(candidate.transform.position, currentTarget.transform.position) >
-                unit.AttackRange * Mathf.Max(1f, coverFiringRangeMultiplier)) continue;
-            if (!HasSightFrom(candidate.transform.position, currentTarget)) continue;
-            best = candidate; bestDistance = distance;
+
+            Vector3 candidatePos = candidate.transform.position;
+            float travelDistance = Distance(transform.position, candidatePos);
+            if (travelDistance > coverDetectionRange) continue;
+
+            // Collider must be assigned. It proves this point is actually behind the intended cover.
+            if (candidate.coverCollider == null) continue;
+            if (!candidate.ProtectsFrom(currentTarget.transform.position)) continue;
+
+            // IMPORTANT: ignore ONLY this candidate's own cover collider for outgoing fire.
+            if (!HasSightFromCover(candidatePos, currentTarget, candidate.coverCollider)) continue;
+
+            // The SAME range is used when selecting and when fighting from cover.
+            float enemyDistance = Distance(candidatePos, currentTarget.transform.position);
+            if (enemyDistance > coverAttackRange) continue;
+
+            float firingPenalty = Mathf.Abs(enemyDistance - unit.AttackRange * 0.80f) * 0.35f;
+            float tieBreaker = Mathf.Abs((candidate.GetInstanceID() * 0.001f + rosterOrder * 0.173f) % 0.17f);
+            float preferenceMultiplier = coverPreference == CoverPreference.High ? 0.65f :
+                                         coverPreference == CoverPreference.Low ? 1.5f : 1f;
+
+            // Prefer nearby usable cover. No "retreat bonus" that encourages unnecessarily
+            // far-away cover behind the squad.
+            float score = travelDistance * preferenceMultiplier + firingPenalty + tieBreaker;
+
+            if (score < bestScore)
+            {
+                bestScore = score;
+                best = candidate;
+            }
         }
+
         if (best == null || !best.TryReserve(unit)) return false;
-        coverPoint = best; return true;
+
+        coverPoint = best;
+        returning = false;
+        currentState = "Cover reserved";
+        return true;
     }
 
     private void ReleaseCover()
@@ -302,12 +503,147 @@ public class AutoCombatAI : MonoBehaviour
     private bool HasSightFrom(Vector3 origin, CombatUnit target)
     {
         if (target == null) return false;
-        // Keep the ray above waist-high usable cover while taller blocking obstacles
-        // still stop attacks and trigger path-based repositioning.
+
         const float sightHeight = 1.5f;
-        return !Physics.Linecast(origin + Vector3.up * sightHeight,
-            target.transform.position + Vector3.up * sightHeight,
-            sightBlockers, QueryTriggerInteraction.Ignore);
+        Vector3 from = origin + Vector3.up * sightHeight;
+        Vector3 to = target.transform.position + Vector3.up * sightHeight;
+        Vector3 dir = to - from;
+        float distance = dir.magnitude;
+        if (distance <= 0.01f) return true;
+
+        RaycastHit[] hits = Physics.RaycastAll(
+            from, dir.normalized, distance, ~0, QueryTriggerInteraction.Ignore);
+
+        System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
+
+        CoverPoint targetCover = target.ActiveCoverPoint;
+
+        // IMPORTANT: occupied tactical cover is authoritative.
+        // If this CoverPoint says its barrier is between this attacker and the target,
+        // the attacker has NO line of sight. This avoids large bosses effectively
+        // seeing/shooting over the cover because of model size or ray height.
+        if (targetCover != null &&
+            targetCover.coverCollider != null &&
+            targetCover.ProtectsFrom(origin))
+        {
+            return false;
+        }
+
+        foreach (var hit in hits)
+        {
+            // Ignore the attacker's own colliders.
+            if (hit.transform == transform || hit.transform.IsChildOf(transform))
+                continue;
+
+            // If the target is occupying cover, its assigned wall must block incoming LOS.
+            // This is checked BEFORE accepting the target collider.
+            if (targetCover != null && targetCover.coverCollider != null)
+            {
+                Collider wall = targetCover.coverCollider;
+                if (hit.collider == wall || hit.collider.transform.IsChildOf(wall.transform))
+                    return false;
+            }
+
+            // We reached the target without a blocking wall.
+            if (hit.transform == target.transform || hit.transform.IsChildOf(target.transform))
+                return true;
+
+            BlockingObstacle blocker = hit.collider.GetComponentInParent<BlockingObstacle>();
+            if (blocker != null && blocker.blocksLineOfSight)
+                return false;
+
+            if (((1 << hit.collider.gameObject.layer) & sightBlockers.value) != 0)
+                return false;
+        }
+
+        return true;
+    }
+
+    private bool HasSightFromCover(Vector3 origin, CombatUnit target, Collider ownCoverCollider)
+    {
+        if (target == null) return false;
+
+        const float sightHeight = 1.5f;
+        Vector3 from = origin + Vector3.up * sightHeight;
+        Vector3 to = target.transform.position + Vector3.up * sightHeight;
+        Vector3 dir = to - from;
+        float distance = dir.magnitude;
+        if (distance <= 0.01f) return true;
+
+        RaycastHit[] hits = Physics.RaycastAll(from, dir.normalized, distance, ~0, QueryTriggerInteraction.Ignore);
+        System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
+
+        foreach (var hit in hits)
+        {
+            if (hit.transform == transform || hit.transform.IsChildOf(transform)) continue;
+            if (hit.transform == target.transform || hit.transform.IsChildOf(target.transform)) return true;
+
+            // The wall protecting THIS CoverPoint must not block the user's outgoing attack.
+            if (ownCoverCollider != null &&
+                (hit.collider == ownCoverCollider || hit.collider.transform.IsChildOf(ownCoverCollider.transform)))
+                continue;
+
+            BlockingObstacle blocker = hit.collider.GetComponentInParent<BlockingObstacle>();
+            if (blocker != null && blocker.blocksLineOfSight) return false;
+
+            if (((1 << hit.collider.gameObject.layer) & sightBlockers.value) != 0) return false;
+        }
+
+        return true;
+    }
+
+    private bool IsSightBlockedByBlockingObstacle(Vector3 origin, CombatUnit target)
+    {
+        if (target == null) return false;
+        const float sightHeight = 1.5f;
+        Vector3 from = origin + Vector3.up * sightHeight;
+        Vector3 to = target.transform.position + Vector3.up * sightHeight;
+        Vector3 dir = to - from;
+        foreach (var hit in Physics.RaycastAll(from, dir.normalized, dir.magnitude, ~0, QueryTriggerInteraction.Ignore))
+        {
+            if (hit.collider.GetComponentInParent<CoverPoint>() != null) continue;
+            BlockingObstacle blocker = hit.collider.GetComponentInParent<BlockingObstacle>();
+            if (blocker != null && blocker.blocksLineOfSight) return true;
+        }
+        return false;
+    }
+
+    private bool IsGoodFiringPosition(Vector3 point, CombatUnit target)
+    {
+        if (target == null) return false;
+        if (Distance(point, target.transform.position) > unit.AttackRange * 0.95f) return false;
+        if (!NavMesh.SamplePosition(point, out var navHit, 0.5f, NavMesh.AllAreas)) return false;
+        return HasSightFrom(navHit.position, target);
+    }
+
+    private bool TryFindLineOfSightPosition(CombatUnit target, out Vector3 bestPoint)
+    {
+        bestPoint = transform.position;
+        if (target == null) return false;
+        float bestScore = float.PositiveInfinity;
+        float radius = Mathf.Max(1.25f, unit.AttackRange * 0.82f);
+        NavMeshPath testPath = new NavMeshPath();
+        if (!NavMesh.SamplePosition(transform.position, out var start, 1.5f, NavMesh.AllAreas)) return false;
+
+        // Search around the enemy for a reachable firing position with clear LOS.
+        const int samples = 16;
+        for (int i = 0; i < samples; i++)
+        {
+            float angle = i * (360f / samples) * Mathf.Deg2Rad;
+            Vector3 raw = target.transform.position + new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * radius;
+            if (!NavMesh.SamplePosition(raw, out var candidate, 1.2f, NavMesh.AllAreas)) continue;
+            if (!HasSightFrom(candidate.position, target)) continue;
+            if (!NavMesh.CalculatePath(start.position, candidate.position, NavMesh.AllAreas, testPath) ||
+                testPath.status != NavMeshPathStatus.PathComplete) continue;
+
+            float score = Distance(transform.position, candidate.position);
+            if (score < bestScore)
+            {
+                bestScore = score;
+                bestPoint = candidate.position;
+            }
+        }
+        return bestScore < float.PositiveInfinity;
     }
 
     private void Navigate(Vector3 destination, float stopDistance)
@@ -326,15 +662,41 @@ public class AutoCombatAI : MonoBehaviour
     private void Move(float speed, bool allowSeparation)
     {
         if (!HasPath()) return;
+        while (HasPath())
+        {
+            Vector3 check = path.corners[corner] - transform.position; check.y = 0f;
+            if (check.sqrMagnitude >= 0.04f) break;
+            corner++;
+        }
+        if (!HasPath()) return;
+
         Vector3 delta = path.corners[corner] - transform.position; delta.y = 0f;
-        if (delta.sqrMagnitude < 0.04f) { corner++; return; }
-        Vector3 direction = delta.normalized;
+        Vector3 forward = delta.normalized;
+        Vector3 direction = forward;
+
         if (allowSeparation && unit.team == CombatUnit.CombatTeam.Player)
-            direction = Vector3.Slerp(direction, (direction + SeparationVector()).normalized, separationStrength);
-        Vector3 candidate = transform.position + direction * Mathf.Min(speed * Time.deltaTime, delta.magnitude);
-        if (NavMesh.SamplePosition(candidate, out var hit, 0.55f, NavMesh.AllAreas))
+        {
+            Vector3 separation = SeparationVector();
+            // Only use the sideways part. Separation may create spacing but may not
+            // push a unit backwards against its NavMesh path.
+            Vector3 sideways = separation - Vector3.Project(separation, forward);
+            direction = (forward + sideways * Mathf.Clamp01(separationStrength)).normalized;
+        }
+
+        float step = Mathf.Min(speed * Time.deltaTime, delta.magnitude);
+        Vector3 candidate = transform.position + direction * step;
+        if (NavMesh.SamplePosition(candidate, out var hit, 0.45f, NavMesh.AllAreas))
             transform.position = hit.position;
-        Face(direction);
+        else
+        {
+            // Narrow passage fallback: ignore separation and preserve forward progress.
+            candidate = transform.position + forward * step;
+            if (NavMesh.SamplePosition(candidate, out hit, 0.65f, NavMesh.AllAreas))
+                transform.position = hit.position;
+            else
+                nextPath = 0f;
+        }
+        Face(forward);
     }
 
     private Vector3 SeparationVector()

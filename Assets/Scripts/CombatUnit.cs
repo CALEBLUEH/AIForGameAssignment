@@ -11,6 +11,11 @@ public class CombatUnit : MonoBehaviour
     public static event Action<CombatUnit> UnitDied;
     public CombatTeam team;
     public bool isBoss, isElite;
+
+    [Header("Shared Character Stats")]
+    [Tooltip("Assign YuukaData, MikaData, AyaneData, etc. All scenes using the same asset share these base stats.")]
+    public CharacterData characterData;
+
     [Header("Basic stats")]
     public float maxHealth = 100f, attackPower = 20f, defense = 5f, attackRange = 5f, attackSpeed = 1f;
     public float resistance = 5f, skillPointRegeneration = 7f, skillPointCapacity = 100f;
@@ -20,6 +25,8 @@ public class CombatUnit : MonoBehaviour
     [SerializeField] private List<ActiveStatusEffect> activeStatuses = new List<ActiveStatusEffect>();
     private int hitsTaken, statusVersion;
     private float coverProtection;
+    private CoverPoint activeCoverPoint;
+    public CoverPoint ActiveCoverPoint => activeCoverPoint;
     private WorldUnitHUD worldHUD;
     private readonly List<Modifier> modifiers = new List<Modifier>();
     public float CurrentHealth => currentHealth;
@@ -36,6 +43,7 @@ public class CombatUnit : MonoBehaviour
 
     private void Awake()
     {
+        ApplyCharacterData();
         currentHealth = maxHealth;
         movementPoints = skillPointCapacity;
         worldHUD = GetComponentInChildren<WorldUnitHUD>(true);
@@ -109,7 +117,18 @@ public class CombatUnit : MonoBehaviour
     public void TakeDamage(float attack, Vector3 source)
     {
         if (isDead) return;
-        float appliedDamage = Mathf.Max(1f, attack - Defense) * (1f - Mathf.Clamp01(coverProtection));
+        float rawDamage = Mathf.Max(1f, attack - Defense);
+        float protection = Mathf.Clamp01(coverProtection);
+
+        // If the current cover has HP, the protected portion damages the cover instead.
+        if (activeCoverPoint != null && protection > 0f)
+        {
+            DestructibleCover destructible = activeCoverPoint.GetComponentInParent<DestructibleCover>();
+            if (destructible != null && !destructible.IsDestroyed)
+                destructible.TakeDamage(rawDamage * protection);
+        }
+
+        float appliedDamage = rawDamage * (1f - protection);
         currentHealth -= appliedDamage;
         if (worldHUD != null) worldHUD.ShowDamage(appliedDamage);
         if (currentHealth <= 0f)
@@ -139,7 +158,47 @@ public class CombatUnit : MonoBehaviour
         currentHealth = Mathf.Min(maxHealth, currentHealth + Mathf.Max(0f, amount));
         if (worldHUD != null && currentHealth > oldHealth) worldHUD.ShowHeal(currentHealth - oldHealth);
     }
-    public void SetCoverProtection(float protection) => coverProtection = Mathf.Clamp01(protection);
+    public void SetCoverProtection(float protection) => SetCoverProtection(protection, null);
+
+    public void SetCoverProtection(float protection, CoverPoint sourceCover)
+    {
+        coverProtection = Mathf.Clamp01(protection);
+        activeCoverPoint = coverProtection > 0f ? sourceCover : null;
+    }
+    public void ApplyCharacterData()
+    {
+        if (characterData == null) return;
+
+        maxHealth = characterData.maxHealth;
+        attackPower = characterData.attackPower;
+        defense = characterData.defense;
+        attackRange = characterData.attackRange;
+        attackSpeed = characterData.attackSpeed;
+        resistance = characterData.resistance;
+        skillPointRegeneration = characterData.skillPointRegeneration;
+        skillPointCapacity = characterData.skillPointCapacity;
+        durationRate = characterData.durationRate;
+        manipulationRate = characterData.manipulationRate;
+    }
+
+    public void ConfigureFromCharacterData(CharacterData data, bool boss)
+    {
+        if (data != null)
+            characterData = data;
+
+        ApplyCharacterData();
+        isBoss = boss;
+        currentHealth = maxHealth;
+        movementPoints = skillPointCapacity;
+        isDead = false;
+        coverProtection = 0f;
+        activeCoverPoint = null;
+        hitsTaken = 0;
+        activeStatuses.Clear();
+        modifiers.Clear();
+        statusVersion++;
+    }
+
     public void ConfigureSpawn(float health, float power, float armor, bool boss)
     {
         maxHealth = health; attackPower = power; defense = armor; isBoss = boss;

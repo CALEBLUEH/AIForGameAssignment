@@ -29,7 +29,33 @@ public class BattleDirector : MonoBehaviour
     public string preparationSceneName = "Preparation";
     [Header("Boss configuration")]
     public string bossName = "Boss 1";
-    public float bossHealth = 650f, bossAttack = 42f, bossDefense = 14f;
+
+    public enum BossStage
+    {
+        Stage1,
+        Stage2,
+        Stage3
+    }
+
+    [Header("Boss Stage Data")]
+    [Tooltip("Choose which of your three BossData assets this stage should use.")]
+    public BossStage bossStage = BossStage.Stage1;
+
+    [Tooltip("Assign BossData for Stage 1.")]
+    public CharacterData bossDataStage1;
+
+    [Tooltip("Assign BossData 1 for Stage 2.")]
+    public CharacterData bossDataStage2;
+
+    [Tooltip("Assign BossData 2 for Stage 3.")]
+    public CharacterData bossDataStage3;
+
+    [Header("Legacy Boss Stats - Compatibility Only")]
+    [Tooltip("Kept so older Editor scripts such as BuildPlayableScene.cs still compile. The spawned boss uses CharacterData from the boss prefab instead.")]
+    public float bossHealth = 520f;
+    public float bossAttack = 34f;
+    public float bossDefense = 10f;
+
     public StatusEffectSpec[] bossSelfEffects;
     public StatusEffectSpec[] bossTargetEffects;
     public StatusEffectSpec[] bossAllyEffects;
@@ -57,6 +83,13 @@ public class BattleDirector : MonoBehaviour
     public bool IsPlaying => isPlaying;
     public float UniversalPoints => universalPoints;
     public bool AutoEnabled => autoEnabled;
+
+    [Header("Selected Attack Radius")]
+    [SerializeField] private Material attackRadiusMaterial;
+    [SerializeField] private float attackRadiusRingWidth = 0.18f;
+    [SerializeField] private float attackRadiusHeightOffset = 0.08f;
+    private GameObject selectedAttackRadiusObject;
+    private GroundRadiusVisual selectedAttackRadiusVisual;
 
     private void Awake()
     {
@@ -263,6 +296,21 @@ public class BattleDirector : MonoBehaviour
         clone.SetActive(true);
     }
 
+    private CharacterData GetBossDataForCurrentStage()
+    {
+        switch (bossStage)
+        {
+            case BossStage.Stage1:
+                return bossDataStage1;
+            case BossStage.Stage2:
+                return bossDataStage2;
+            case BossStage.Stage3:
+                return bossDataStage3;
+            default:
+                return bossDataStage1;
+        }
+    }
+
     private void SpawnBoss()
     {
         if (enemyTemplates.Count == 0) return;
@@ -272,10 +320,28 @@ public class BattleDirector : MonoBehaviour
         clone.transform.localScale = Vector3.one * 2.2f;
         clone.SetActive(true);
         boss = clone.GetComponent<CombatUnit>();
-        boss.ConfigureSpawn(bossHealth, bossAttack, bossDefense, true);
+        if (boss == null)
+        {
+            Debug.LogError("The spawned boss prefab needs a CombatUnit component.");
+            Destroy(clone);
+            return;
+        }
+
+        // The boss is generated at runtime. Pick the CharacterData for this stage
+        // and apply it directly to the newly generated CombatUnit.
+        CharacterData selectedBossData = GetBossDataForCurrentStage();
+
+        if (selectedBossData != null)
+        {
+            boss.ConfigureFromCharacterData(selectedBossData, true);
+        }
+        else
+        {
+            Debug.LogWarning($"No CharacterData assigned for {bossStage}. Using legacy fallback boss stats.");
+            boss.ConfigureSpawn(bossHealth, bossAttack, bossDefense, true);
+        }
+
         boss.isElite = true;
-        boss.attackRange = 6.5f;
-        boss.attackSpeed = 0.7f;
         clone.GetComponent<AutoCombatAI>().ConfigureEnemyAbilities(
             bossSelfEffects, bossTargetEffects, bossAllyEffects, bossAbilityCooldown);
     }
@@ -288,7 +354,49 @@ public class BattleDirector : MonoBehaviour
     private void SelectMember(int index)
     {
         if (IsUsableSquadMember(index))
-        { selectedIndex = index; ExitTargeting(); }
+        {
+            selectedIndex = index;
+            ExitTargeting();
+            RefreshSelectedAttackRadius();
+        }
+    }
+
+    private void RefreshSelectedAttackRadius()
+    {
+        AutoCombatAI selectedMember = Selected;
+
+        if (selectedMember == null || selectedMember.Unit == null || selectedMember.Unit.IsDead)
+        {
+            if (selectedAttackRadiusObject != null)
+                selectedAttackRadiusObject.SetActive(false);
+            return;
+        }
+
+        if (selectedAttackRadiusObject == null)
+        {
+            selectedAttackRadiusObject = new GameObject("Selected Attack Radius");
+            selectedAttackRadiusVisual = selectedAttackRadiusObject.AddComponent<GroundRadiusVisual>();
+
+            MeshRenderer renderer = selectedAttackRadiusObject.GetComponent<MeshRenderer>();
+            if (attackRadiusMaterial != null)
+                renderer.sharedMaterial = attackRadiusMaterial;
+
+            selectedAttackRadiusVisual.radiusSource = GroundRadiusVisual.RadiusSource.AttackRange;
+            selectedAttackRadiusVisual.ringWidth = attackRadiusRingWidth;
+            selectedAttackRadiusVisual.heightOffset = attackRadiusHeightOffset;
+        }
+
+        selectedAttackRadiusObject.SetActive(true);
+        selectedAttackRadiusObject.transform.SetParent(selectedMember.transform, false);
+        selectedAttackRadiusObject.transform.localPosition = Vector3.zero;
+        selectedAttackRadiusObject.transform.localRotation = Quaternion.identity;
+        selectedAttackRadiusObject.transform.localScale = Vector3.one;
+
+        selectedAttackRadiusVisual.combatUnit = selectedMember.Unit;
+        selectedAttackRadiusVisual.radiusSource = GroundRadiusVisual.RadiusSource.AttackRange;
+        selectedAttackRadiusVisual.ringWidth = attackRadiusRingWidth;
+        selectedAttackRadiusVisual.heightOffset = attackRadiusHeightOffset;
+        selectedAttackRadiusVisual.GenerateRing();
     }
 
     private AutoCombatAI Selected
@@ -344,19 +452,50 @@ public class BattleDirector : MonoBehaviour
     {
         ExitTargeting();
         if (Selected == null || Selected.Unit.IsDead || !TrySpendUniversal(coverCost)) return;
+
         Vector3 forward = Selected.transform.forward;
         forward.y = 0f;
         if (forward.sqrMagnitude < 0.01f) forward = Vector3.right;
-        Vector3 position = Selected.transform.position + forward.normalized * 2f;
+        forward.Normalize();
+
+        Vector3 position = Selected.transform.position + forward * 2f;
         position.y = 0f;
+
         var block = GameObject.CreatePrimitive(PrimitiveType.Cube);
         block.name = "Placed Cover";
         block.transform.position = position + Vector3.up * 0.9f;
         block.transform.rotation = Quaternion.LookRotation(forward);
         block.transform.localScale = new Vector3(2.5f, 1.8f, 0.7f);
         block.layer = 8;
+
         var obstacle = block.AddComponent<NavMeshObstacle>();
         obstacle.carving = true;
+
+        // The skill-created wall has its own HP. Damage prevented by its protection
+        // is transferred to this object until it breaks.
+        block.AddComponent<DestructibleCover>();
+
+        // IMPORTANT: the old skill only spawned a NavMesh obstacle.
+        // AutoCombatAI therefore saw it only as something to walk around.
+        // Add real CoverPoints on the PLAYER side of the wall so ranged units can use it.
+        Vector3 right = block.transform.right;
+        Vector3 playerSide = position - forward * 0.85f;
+
+        for (int i = -1; i <= 1; i++)
+        {
+            GameObject pointObject = new GameObject("Placed Cover Point " + (i + 2));
+            pointObject.transform.SetParent(block.transform, true);
+
+            Vector3 pointPosition = playerSide + right * (i * 0.75f);
+            pointPosition.y = Selected.transform.position.y;
+            pointObject.transform.position = pointPosition;
+
+            CoverPoint point = pointObject.AddComponent<CoverPoint>();
+            point.coverCollider = block.GetComponent<Collider>();
+            point.protection = 0.35f;
+            point.occupancyRadius = 0.45f;
+        }
+
         if (targetingFeedback != null)
             targetingFeedback.PlayFeedback(position, new Color(0.25f, 0.75f, 1f));
     }
@@ -497,6 +636,8 @@ public class BattleDirector : MonoBehaviour
                     ? new Color(0.12f, 0.78f, 0.96f, 1f)
                     : new Color(0.14f, 0.19f, 0.29f, 0.9f);
         }
+        RefreshSelectedAttackRadius();
+
         AutoCombatAI selectedMember = Selected;
         if (selectedMember != null)
         {

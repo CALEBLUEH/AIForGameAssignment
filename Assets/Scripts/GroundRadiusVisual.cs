@@ -4,10 +4,19 @@ using UnityEngine;
 [RequireComponent(typeof(MeshRenderer))]
 public class GroundRadiusVisual : MonoBehaviour
 {
-    [Header("Radius Source")]
-    public SquadMember squadMember;
+    public enum RadiusSource
+    {
+        SquadLeaderCombatRadius,
+        AttackRange,
+        Manual
+    }
 
-    [Header("Fallback Radius")]
+    [Header("Radius Source")]
+    public RadiusSource radiusSource = RadiusSource.SquadLeaderCombatRadius;
+    public SquadMember squadMember;
+    public CombatUnit combatUnit;
+
+    [Header("Fallback / Manual Radius")]
     public float radius = 18f;
 
     [Header("Ring Shape")]
@@ -47,9 +56,15 @@ public class GroundRadiusVisual : MonoBehaviour
 
     private float GetCurrentRadius()
     {
-        if (squadMember != null)
+        switch (radiusSource)
         {
-            return squadMember.leaderCombatRadius;
+            case RadiusSource.AttackRange:
+                if (combatUnit != null) return combatUnit.AttackRange;
+                break;
+
+            case RadiusSource.SquadLeaderCombatRadius:
+                if (squadMember != null) return squadMember.leaderCombatRadius;
+                break;
         }
 
         return radius;
