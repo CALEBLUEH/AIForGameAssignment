@@ -201,7 +201,7 @@ public class BattleDirector : MonoBehaviour
         }
         UpdateTargetPointer();
         if (Input.GetMouseButtonDown(0) && targetMode != TargetMode.None &&
-            (EventSystem.current == null || !EventSystem.current.IsPointerOverGameObject()))
+            !IsPointerOverInteractiveUI())
             HandleWorldClick();
         if (targetMode != TargetMode.None && Input.GetKeyDown(KeyCode.Escape)) ExitTargeting();
         RefreshBattle();
@@ -240,11 +240,43 @@ public class BattleDirector : MonoBehaviour
 
     private void SelectMember(int index)
     {
-        if (index < squad.Count && squad[index] != null && squad[index].gameObject.activeInHierarchy)
+        if (IsUsableSquadMember(index))
         { selectedIndex = index; ExitTargeting(); }
     }
 
-    private AutoCombatAI Selected => selectedIndex < squad.Count ? squad[selectedIndex] : null;
+    private AutoCombatAI Selected
+    {
+        get
+        {
+            if (IsUsableSquadMember(selectedIndex)) return squad[selectedIndex];
+            for (int i = 0; i < squad.Count; i++)
+            {
+                if (!IsUsableSquadMember(i)) continue;
+                selectedIndex = i;
+                return squad[i];
+            }
+            return null;
+        }
+    }
+
+    private bool IsUsableSquadMember(int index)
+    {
+        if (index < 0 || index >= squad.Count) return false;
+        AutoCombatAI member = squad[index];
+        return member != null && member.gameObject.activeInHierarchy &&
+            member.Unit != null && !member.Unit.IsDead;
+    }
+
+    private static bool IsPointerOverInteractiveUI()
+    {
+        if (EventSystem.current == null) return false;
+        var pointer = new PointerEventData(EventSystem.current) { position = Input.mousePosition };
+        var results = new List<RaycastResult>();
+        EventSystem.current.RaycastAll(pointer, results);
+        foreach (RaycastResult result in results)
+            if (result.gameObject.GetComponentInParent<Selectable>() != null) return true;
+        return false;
+    }
 
     private void UseCharacterSkill()
     {
@@ -415,19 +447,20 @@ public class BattleDirector : MonoBehaviour
                     ? new Color(0.12f, 0.78f, 0.96f, 1f)
                     : new Color(0.14f, 0.19f, 0.29f, 0.9f);
         }
-        if (Selected != null)
+        AutoCombatAI selectedMember = Selected;
+        if (selectedMember != null)
         {
-            var unit = Selected.Unit;
-            squadText.text = Selected.name + "  HP " + Mathf.CeilToInt(unit.CurrentHealth) + "/" + unit.maxHealth +
+            var unit = selectedMember.Unit;
+            squadText.text = selectedMember.name + "  HP " + Mathf.CeilToInt(unit.CurrentHealth) + "/" + unit.maxHealth +
                 "  Move " + Mathf.FloorToInt(unit.MovementPoints) + "/" + unit.skillPointCapacity +
-                "  •  " + Selected.CurrentState +
+                "  •  " + selectedMember.CurrentState +
                 (targetMode == TargetMode.None ? "" : "  •  " +
                     (targetMode == TargetMode.Move ? "Click a move position" :
-                    Selected.characterSkillKind == AutoCombatAI.CharacterSkillKind.PowerUp ? "Click to activate" : "Click near a target"));
+                    selectedMember.characterSkillKind == AutoCombatAI.CharacterSkillKind.PowerUp ? "Click to activate" : "Click near a target"));
             RefreshCooldown(moveCooldownOverlay, moveCooldownText, moveButton,
-                Selected.MovementCooldownRemaining, unit.MovementPoints >= Selected.movementCost);
+                selectedMember.MovementCooldownRemaining, unit.MovementPoints >= selectedMember.movementCost);
             RefreshCooldown(skillCooldownOverlay, skillCooldownText, skillButton,
-                Selected.CharacterCooldownRemaining, universalPoints >= Selected.characterSkillCost);
+                selectedMember.CharacterCooldownRemaining, universalPoints >= selectedMember.characterSkillCost);
         }
         bool showBoss = boss != null && !boss.IsDead && phase == StagePhase.Boss;
         if (bossHealthPanel != null) bossHealthPanel.SetActive(showBoss);
@@ -438,8 +471,13 @@ public class BattleDirector : MonoBehaviour
             if (bossNameText != null) bossNameText.text = boss.name;
         }
         for (int i = 0; i < squadButtons.Length && i < squad.Count; i++)
-            squadButtons[i].GetComponentInChildren<Text>().text =
-                (i == selectedIndex ? "▶ " : "") + squad[i].name;
+        {
+            AutoCombatAI member = squad[i];
+            bool alive = member != null && member.Unit != null && !member.Unit.IsDead;
+            squadButtons[i].interactable = alive;
+            squadButtons[i].GetComponentInChildren<Text>().text = (i == selectedIndex && alive ? "▶ " : "") +
+                (alive ? member.name : "DOWN");
+        }
     }
 
     private static void RefreshCooldown(Image overlay, Text timer, Button button, float remaining, bool affordable)

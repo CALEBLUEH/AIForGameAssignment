@@ -145,7 +145,8 @@ public static class BuildPlayableScene
             director.energySegments.Length != 10 || director.pauseButton == null ||
             director.speedButton == null || director.autoButton == null ||
             director.manaSlider == null || director.bossHealthSlider == null ||
-            director.targetingFeedback == null)
+            director.targetingFeedback == null ||
+            director.battlePanel.GetComponent<Image>().raycastTarget)
             throw new System.Exception("Canvas HUD is incomplete.");
         if (GameObject.Find("Linear Stage Environment") == null ||
             Object.FindObjectsByType<CoverPoint>(FindObjectsSortMode.None).Length < 6 ||
@@ -236,6 +237,7 @@ public static class BuildPlayableScene
         // cost segments and action cards on the lower-right.
         director.battlePanel = Panel(canvasObject.transform, "Battle HUD", new Vector2(1600, 900),
             new Vector2(0.5f, 0.5f), Color.clear);
+        director.battlePanel.GetComponent<Image>().raycastTarget = false;
         var level = Panel(director.battlePanel.transform, "Level Badge", new Vector2(230, 62),
             new Vector2(0.5f, 0.5f), navy);
         level.GetComponent<RectTransform>().anchoredPosition = new Vector2(-670, 395);

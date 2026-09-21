@@ -203,9 +203,6 @@ public class AutoCombatAI : MonoBehaviour
             movementReadyAt = Time.time + movementCooldown;
             return true;
         }
-        if (movementKind == MovementKind.Dash &&
-            Physics.Linecast(transform.position + Vector3.up, hit.position + Vector3.up, sightBlockers))
-        { unit.RefundMovementPoints(movementCost); return false; }
         var movementPath = new NavMeshPath();
         if (!NavMesh.CalculatePath(start.position, hit.position, NavMesh.AllAreas, movementPath) ||
             movementPath.status != NavMeshPathStatus.PathComplete || movementPath.corners.Length < 2)
