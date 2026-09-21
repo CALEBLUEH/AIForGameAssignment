@@ -8,11 +8,16 @@ public class WorldUnitHUD : MonoBehaviour
     public Image healthFill;
     public Text unitName;
     public Text[] damageLabels;
+    [Header("Status effects")]
+    public StatusIconCatalog statusIconCatalog;
+    public RectTransform statusContainer;
+    public Image[] statusIcons;
     public Color playerColor = new Color(0.12f, 0.78f, 1f, 1f);
     public Color enemyColor = new Color(1f, 0.22f, 0.18f, 1f);
     private float[] labelLives;
     private Vector2[] labelOrigins;
     private int nextLabel;
+    private int shownStatusVersion = -1;
 
     private void Awake()
     {
@@ -34,6 +39,7 @@ public class WorldUnitHUD : MonoBehaviour
         if (healthFill != null) healthFill.color =
             unit.team == CombatUnit.CombatTeam.Player ? playerColor : enemyColor;
         RefreshHealth();
+        RefreshStatuses();
     }
 
     private void LateUpdate()
@@ -42,6 +48,7 @@ public class WorldUnitHUD : MonoBehaviour
         Camera camera = Camera.main;
         if (camera != null) transform.rotation = camera.transform.rotation;
         RefreshHealth();
+        if (shownStatusVersion != unit.StatusVersion) RefreshStatuses();
         for (int i = 0; i < labelLives.Length; i++)
         {
             if (labelLives[i] <= 0f) continue;
@@ -52,6 +59,34 @@ public class WorldUnitHUD : MonoBehaviour
             color.a = 1f - progress;
             damageLabels[i].color = color;
             if (labelLives[i] <= 0f) damageLabels[i].gameObject.SetActive(false);
+        }
+    }
+
+    private void RefreshStatuses()
+    {
+        shownStatusVersion = unit == null ? -1 : unit.StatusVersion;
+        if (statusIcons == null) return;
+        for (int i = 0; i < statusIcons.Length; i++) statusIcons[i].gameObject.SetActive(false);
+        if (unit == null || statusIconCatalog == null) return;
+        int visibleCount = 0;
+        foreach (CombatUnit.ActiveStatusEffect effect in unit.ActiveStatuses)
+            if (statusIconCatalog.GetIcon(effect.type) != null && visibleCount < statusIcons.Length) visibleCount++;
+        int shown = 0;
+        foreach (CombatUnit.ActiveStatusEffect effect in unit.ActiveStatuses)
+        {
+            Sprite sprite = statusIconCatalog.GetIcon(effect.type);
+            if (sprite == null || shown >= statusIcons.Length) continue;
+            Image icon = statusIcons[shown];
+            icon.sprite = sprite;
+            icon.preserveAspect = true;
+            icon.gameObject.SetActive(true);
+            RectTransform rect = icon.rectTransform;
+            rect.sizeDelta = statusIconCatalog.iconSize;
+            float totalWidth = visibleCount * statusIconCatalog.iconSize.x +
+                Mathf.Max(0, visibleCount - 1) * statusIconCatalog.iconSpacing;
+            rect.anchoredPosition = new Vector2(-totalWidth * 0.5f + statusIconCatalog.iconSize.x * 0.5f +
+                shown * (statusIconCatalog.iconSize.x + statusIconCatalog.iconSpacing), 0f);
+            shown++;
         }
     }
 

@@ -150,6 +150,7 @@ public static class BuildPlayableScene
             throw new System.Exception("Canvas HUD is incomplete.");
         if (GameObject.Find("Linear Stage Environment") == null ||
             Object.FindObjectsByType<CoverPoint>(FindObjectsSortMode.None).Length < 6 ||
+            Object.FindObjectsByType<BlockingObstacle>(FindObjectsSortMode.None).Length < 10 ||
             Camera.main == null || Camera.main.GetComponent<TacticalCameraFollow>() == null)
             throw new System.Exception("Linear stage environment is incomplete.");
         int players = 0, enemies = 0;
@@ -159,11 +160,12 @@ public static class BuildPlayableScene
                 throw new System.Exception(unit.name + " is not on the baked NavMesh.");
             var worldHUD = unit.GetComponentInChildren<WorldUnitHUD>(true);
             if (worldHUD == null || worldHUD.healthSlider == null || worldHUD.damageLabels == null ||
-                worldHUD.damageLabels.Length < 4)
+                worldHUD.damageLabels.Length < 4 || worldHUD.statusIconCatalog == null ||
+                worldHUD.statusIcons == null || worldHUD.statusIcons.Length != 8)
                 throw new System.Exception(unit.name + " is missing its world health and damage UI.");
             if (unit.team == CombatUnit.CombatTeam.Player) players++; else enemies++;
         }
-        if (players != 4 || enemies != 3) throw new System.Exception("Unexpected initial unit count.");
+        if (players != 5 || enemies != 3) throw new System.Exception("Unexpected initial unit count.");
         if (!NavMesh.SamplePosition(new Vector3(-10f, 0f, 0f), out NavMeshHit roadStart, 2f, NavMesh.AllAreas) ||
             !NavMesh.SamplePosition(new Vector3(57f, 0f, 0f), out NavMeshHit bossSection, 2f, NavMesh.AllAreas))
             throw new System.Exception("Road endpoints are not on the NavMesh.");
@@ -173,22 +175,49 @@ public static class BuildPlayableScene
             throw new System.Exception("The three road sections are not connected.");
         if (NavMesh.SamplePosition(new Vector3(25f, 0f, 14f), out _, 1f, NavMesh.AllAreas))
             throw new System.Exception("Roadside area is unexpectedly walkable.");
+        var statTestObject = new GameObject("Status Calculation Validation");
+        CombatUnit statTest = statTestObject.AddComponent<CombatUnit>();
+        statTest.attackPower = 20f; statTest.defense = 10f;
+        statTest.ApplyStatus(Effect(StatusEffectType.Strength, 5f, 5f));
+        statTest.ApplyStatus(Effect(StatusEffectType.Rage, 0.2f, 5f));
+        statTest.ApplyStatus(Effect(StatusEffectType.Hardening, 2f, 5f));
+        statTest.ApplyStatus(Effect(StatusEffectType.Fortified, 0.25f, 5f));
+        if (!Mathf.Approximately(statTest.AttackPower, 30f) || !Mathf.Approximately(statTest.Defense, 15f))
+            throw new System.Exception("Flat-then-percentage status calculation is incorrect.");
+        Object.DestroyImmediate(statTestObject);
         if (!director.startImmediately || director.pausePanel == null || director.resumeButton == null ||
             director.backButton == null || director.pausePanel.GetComponentInChildren<AudioSettingsUI>(true) == null)
             throw new System.Exception("Gameplay preparation flow or pause audio panel is incomplete.");
         var buildScenes = EditorBuildSettings.scenes;
-        if (buildScenes.Length < 2 || buildScenes[0].path != "Assets/Scenes/Preparation.unity" ||
-            buildScenes[1].path != "Assets/Scenes/GameplayAI.unity")
-            throw new System.Exception("Preparation must be the first build scene.");
+        if (buildScenes.Length < 5 || buildScenes[0].path != "Assets/Scenes/LevelSelection.unity" ||
+            buildScenes[1].path != "Assets/Scenes/Preparation.unity" ||
+            buildScenes[2].path != "Assets/Scenes/GameplayAI.unity" ||
+            buildScenes[3].path != "Assets/Scenes/GameplayLevel2.unity" ||
+            buildScenes[4].path != "Assets/Scenes/GameplayLevel3.unity")
+            throw new System.Exception("Campaign build scene order is incorrect.");
         EditorSceneManager.OpenScene("Assets/Scenes/Preparation.unity");
         var preparation = Object.FindFirstObjectByType<PreparationMenuController>();
         if (preparation == null || preparation.battleButton == null || preparation.settingsPanel == null ||
             preparation.settingsPanel.GetComponent<AudioSettingsUI>() == null ||
+            preparation.characterButtons == null || preparation.characterButtons.Length != 5 ||
             Object.FindFirstObjectByType<PreparationCameraController>() == null ||
             GameObject.Find("Ready Characters") == null ||
-            GameObject.Find("Ready Characters").transform.childCount != 4)
+            GameObject.Find("Ready Characters").transform.childCount != 5)
             throw new System.Exception("Preparation scene is incomplete.");
-        Debug.Log("AIFG scene validation passed: preparation flow, Canvas audio menus, unit health bars, damage numbers, NavMesh paths and no NavMeshAgent.");
+        EditorSceneManager.OpenScene("Assets/Scenes/LevelSelection.unity");
+        LevelSelectionController levelSelection = Object.FindFirstObjectByType<LevelSelectionController>();
+        if (levelSelection == null || levelSelection.levelCards == null || levelSelection.levelCards.Length != 3)
+            throw new System.Exception("Level Selection scene is incomplete.");
+        for (int level = 2; level <= 3; level++)
+        {
+            EditorSceneManager.OpenScene(GameProgress.BattleSceneForLevel(level) == "GameplayLevel2"
+                ? "Assets/Scenes/GameplayLevel2.unity" : "Assets/Scenes/GameplayLevel3.unity");
+            BattleDirector stageDirector = Object.FindFirstObjectByType<BattleDirector>();
+            if (stageDirector == null || stageDirector.levelNumber != level ||
+                Object.FindObjectsByType<CombatUnit>(FindObjectsSortMode.None).Length != 8)
+                throw new System.Exception("Battle level " + level + " is incomplete.");
+        }
+        Debug.Log("AIFG campaign validation passed: 3 levels, 5-character roster, statuses, Canvas icons, cover/blockers, NavMesh and no NavMeshAgent.");
     }
 
     [MenuItem("AIFG/Apply LamZH UI Template")]
@@ -465,9 +494,317 @@ public static class BuildPlayableScene
         Debug.Log("Built preparation scene, gameplay pause audio panel, and world unit HUDs.");
     }
 
+    [MenuItem("AIFG/Build Three-Level Campaign Expansion")]
+    public static void BuildCampaignExpansion()
+    {
+        ConfigureBaseRosterAndStage();
+        const string levelTwoPath = "Assets/Scenes/GameplayLevel2.unity";
+        const string levelThreePath = "Assets/Scenes/GameplayLevel3.unity";
+        if (AssetDatabase.LoadAssetAtPath<SceneAsset>(levelTwoPath) == null)
+            AssetDatabase.CopyAsset("Assets/Scenes/GameplayAI.unity", levelTwoPath);
+        if (AssetDatabase.LoadAssetAtPath<SceneAsset>(levelThreePath) == null)
+            AssetDatabase.CopyAsset("Assets/Scenes/GameplayAI.unity", levelThreePath);
+        ConfigureStageScene(levelTwoPath, 2);
+        ConfigureStageScene(levelThreePath, 3);
+        UpgradePreparationScene();
+        BuildLevelSelectionScene();
+        EditorBuildSettings.scenes = new[]
+        {
+            new EditorBuildSettingsScene("Assets/Scenes/LevelSelection.unity", true),
+            new EditorBuildSettingsScene("Assets/Scenes/Preparation.unity", true),
+            new EditorBuildSettingsScene("Assets/Scenes/GameplayAI.unity", true),
+            new EditorBuildSettingsScene(levelTwoPath, true),
+            new EditorBuildSettingsScene(levelThreePath, true)
+        };
+        AssetDatabase.SaveAssets();
+        Debug.Log("Built three-level selection, five-character roster, shared status UI, and stage configurations.");
+    }
+
+    private static void ConfigureBaseRosterAndStage()
+    {
+        var scene = EditorSceneManager.OpenScene("Assets/Scenes/GameplayAI.unity");
+        RenameIfPresent("Aegis", "Yuuka");
+        RenameIfPresent("Medic", "Ayane");
+        RenameIfPresent("Ranger", "Mika");
+        RenameIfPresent("Vanguard", "Momoi");
+        GameObject momoi = GameObject.Find("Momoi");
+        if (GameObject.Find("Hina") == null && momoi != null)
+        {
+            GameObject hina = Object.Instantiate(momoi, momoi.transform.parent);
+            hina.name = "Hina";
+            hina.transform.position = new Vector3(-14f, 1f, 0f);
+        }
+        ConfigureCharacter("Yuuka", AutoCombatAI.CombatRole.YuukaTank, 0,
+            AutoCombatAI.CharacterSkillKind.Defensive, 160f, 18f, 12f, 35f, 10f, 1f, 5f,
+            Effect(StatusEffectType.Hardening, 7f, 8f), Effect(StatusEffectType.Fortified, 0.2f, 6f));
+        ConfigureCharacter("Ayane", AutoCombatAI.CombatRole.AyaneHealer, 1,
+            AutoCombatAI.CharacterSkillKind.Heal, 105f, 15f, 5f, 35f, 8f, 1f, 7f,
+            Effect(StatusEffectType.Strength, 8f, 8f), default);
+        ConfigureCharacter("Mika", AutoCombatAI.CombatRole.MikaSingleTarget, 2,
+            AutoCombatAI.CharacterSkillKind.Burst, 120f, 34f, 6f, 45f, 11f, 3.2f, 7f,
+            Effect(StatusEffectType.Penetration, 6f, 8f), default);
+        ConfigureCharacter("Momoi", AutoCombatAI.CombatRole.MomoiLowCostAOE, 3,
+            AutoCombatAI.CharacterSkillKind.LowCostAOE, 105f, 22f, 5f, 25f, 7f, 1.3f, 8f,
+            Effect(StatusEffectType.Weak, 7f, 7f), default);
+        ConfigureCharacter("Hina", AutoCombatAI.CombatRole.HinaHighCostAOE, 4,
+            AutoCombatAI.CharacterSkillKind.HighCostAOE, 115f, 30f, 5f, 65f, 14f, 2f, 9f,
+            Effect(StatusEffectType.Piercing, 0.25f, 9f), default);
+        Vector3[] positions =
+        {
+            new Vector3(-10f, 1f, -3.5f), new Vector3(-12f, 1f, -1.7f),
+            new Vector3(-10f, 1f, 0f), new Vector3(-12f, 1f, 1.7f), new Vector3(-10f, 1f, 3.5f)
+        };
+        string[] names = { "Yuuka", "Ayane", "Mika", "Momoi", "Hina" };
+        for (int i = 0; i < names.Length; i++) if (GameObject.Find(names[i]) != null) GameObject.Find(names[i]).transform.position = positions[i];
+        AddBlockingObstacleMarkers();
+        ConfigureStageValues(1);
+        AttachWorldUnitHUDs();
+        EditorSceneManager.MarkSceneDirty(scene);
+        EditorSceneManager.SaveScene(scene);
+    }
+
+    private static void RenameIfPresent(string oldName, string newName)
+    {
+        GameObject current = GameObject.Find(newName);
+        if (current != null) return;
+        GameObject old = GameObject.Find(oldName);
+        if (old != null) old.name = newName;
+    }
+
+    private static void ConfigureCharacter(string name, AutoCombatAI.CombatRole role, int order,
+        AutoCombatAI.CharacterSkillKind skill, float health, float attack, float defense, float cost,
+        float cooldown, float multiplier, float range, StatusEffectSpec primary, StatusEffectSpec secondary)
+    {
+        GameObject character = GameObject.Find(name);
+        if (character == null) throw new System.Exception("Missing character " + name);
+        CombatUnit unit = character.GetComponent<CombatUnit>();
+        AutoCombatAI ai = character.GetComponent<AutoCombatAI>();
+        unit.team = CombatUnit.CombatTeam.Player;
+        unit.maxHealth = health; unit.attackPower = attack; unit.defense = defense;
+        ai.role = role; ai.rosterOrder = order; ai.characterSkillKind = skill;
+        ai.characterSkillCost = cost; ai.characterSkillCooldown = cooldown;
+        ai.skillPowerMultiplier = multiplier; ai.skillRange = range;
+        ai.primaryEffect = primary; ai.secondaryEffect = secondary;
+        ai.aoeRadius = role == AutoCombatAI.CombatRole.HinaHighCostAOE ? 5.5f :
+            role == AutoCombatAI.CombatRole.MomoiLowCostAOE ? 4.5f : 4f;
+        ai.skillHealAmount = 45f;
+        ai.healingThreshold = 0.72f; ai.defensiveHealthThreshold = 0.58f;
+        ai.aoeMinimumEnemyCount = 2; ai.expensiveAoeMinimumEnemyCount = 3;
+        ai.separationDistance = 1.35f; ai.separationStrength = 0.7f; ai.coverDetectionRange = 12f;
+    }
+
+    private static StatusEffectSpec Effect(StatusEffectType type, float amount, float duration) =>
+        new StatusEffectSpec { type = type, amount = amount, duration = duration };
+
+    private static void AddBlockingObstacleMarkers()
+    {
+        GameObject environment = GameObject.Find("Linear Stage Environment");
+        if (environment == null) return;
+        foreach (Collider collider in environment.GetComponentsInChildren<Collider>(true))
+        {
+            string obstacleName = collider.gameObject.name;
+            bool blocking = obstacleName.Contains("Boundary") || obstacleName.Contains("Building");
+            if (blocking && collider.GetComponent<BlockingObstacle>() == null)
+                collider.gameObject.AddComponent<BlockingObstacle>();
+        }
+    }
+
+    private static void ConfigureStageScene(string path, int level)
+    {
+        var scene = EditorSceneManager.OpenScene(path);
+        ConfigureStageValues(level);
+        EditorSceneManager.MarkSceneDirty(scene);
+        EditorSceneManager.SaveScene(scene);
+    }
+
+    private static void ConfigureStageValues(int level)
+    {
+        BattleDirector director = Object.FindFirstObjectByType<BattleDirector>();
+        director.levelNumber = level;
+        director.startImmediately = true;
+        director.bossName = "Boss " + level;
+        director.bossHealth = 580f + level * 120f;
+        director.bossAttack = 36f + level * 7f;
+        director.bossDefense = 11f + level * 3f;
+        director.bossAbilityCooldown = level == 3 ? 7f : 9f;
+        if (level == 1)
+        {
+            director.bossSelfEffects = new[] { Effect(StatusEffectType.Hardening, 8f, 8f) };
+            director.bossTargetEffects = new[] { Effect(StatusEffectType.Weak, 8f, 7f) };
+            director.bossAllyEffects = new StatusEffectSpec[0];
+        }
+        else if (level == 2)
+        {
+            director.bossSelfEffects = new[] { Effect(StatusEffectType.Fortified, 0.25f, 8f) };
+            director.bossTargetEffects = new[] { Effect(StatusEffectType.Penetration, 7f, 8f) };
+            director.bossAllyEffects = new[] { Effect(StatusEffectType.Hardening, 6f, 7f) };
+        }
+        else
+        {
+            director.bossSelfEffects = new[] { Effect(StatusEffectType.Rage, 0.28f, 7f), Effect(StatusEffectType.Fortified, 0.25f, 7f) };
+            director.bossTargetEffects = new[] { Effect(StatusEffectType.Dull, 0.22f, 7f), Effect(StatusEffectType.Piercing, 0.25f, 7f) };
+            director.bossAllyEffects = new StatusEffectSpec[0];
+        }
+        int enemyIndex = 0;
+        foreach (AutoCombatAI ai in Object.FindObjectsByType<AutoCombatAI>(FindObjectsSortMode.None))
+        {
+            CombatUnit unit = ai.GetComponent<CombatUnit>();
+            if (unit.team != CombatUnit.CombatTeam.Enemy) continue;
+            ai.role = AutoCombatAI.CombatRole.Enemy;
+            unit.isElite = enemyIndex == 2;
+            unit.maxHealth = 90f + level * 25f + (unit.isElite ? 45f : 0f);
+            unit.attackPower = 18f + level * 5f;
+            if (level == 1)
+            {
+                ai.selfAbilityEffects = enemyIndex % 2 == 0 ? new[] { Effect(StatusEffectType.Strength, 6f, 7f) } : new StatusEffectSpec[0];
+                ai.targetAbilityEffects = enemyIndex % 2 == 1 ? new[] { Effect(StatusEffectType.Weak, 5f, 6f) } : new StatusEffectSpec[0];
+            }
+            else if (level == 2)
+            {
+                ai.selfAbilityEffects = new[] { Effect(StatusEffectType.Hardening, 6f, 7f) };
+                ai.targetAbilityEffects = new[] { Effect(StatusEffectType.Penetration, 5f, 7f) };
+            }
+            else
+            {
+                ai.selfAbilityEffects = new[] { Effect(StatusEffectType.Rage, 0.18f, 7f) };
+                ai.targetAbilityEffects = enemyIndex % 2 == 0
+                    ? new[] { Effect(StatusEffectType.Dull, 0.16f, 7f) }
+                    : new[] { Effect(StatusEffectType.Piercing, 0.18f, 7f) };
+            }
+            ai.allyAbilityEffects = new StatusEffectSpec[0];
+            ai.enemyAbilityCooldown = 9f - level * 0.5f;
+            enemyIndex++;
+        }
+    }
+
+    private static void UpgradePreparationScene()
+    {
+        var scene = EditorSceneManager.OpenScene("Assets/Scenes/Preparation.unity");
+        PreparationMenuController controller = Object.FindFirstObjectByType<PreparationMenuController>();
+        Canvas canvas = Object.FindFirstObjectByType<Canvas>();
+        if (controller == null || canvas == null) throw new System.Exception("Existing Preparation scene is incomplete.");
+        RenameIfPresent("Aegis Ready Display", "Yuuka Ready Display");
+        RenameIfPresent("Medic Ready Display", "Ayane Ready Display");
+        RenameIfPresent("Ranger Ready Display", "Mika Ready Display");
+        RenameIfPresent("Vanguard Ready Display", "Momoi Ready Display");
+        Transform readyRoot = GameObject.Find("Ready Characters").transform;
+        if (GameObject.Find("Hina Ready Display") == null)
+        {
+            Transform source = readyRoot.Find("Momoi Ready Display");
+            GameObject hina = Object.Instantiate(source.gameObject, readyRoot);
+            hina.name = "Hina Ready Display";
+        }
+        string[] names = { "Yuuka", "Ayane", "Mika", "Momoi", "Hina" };
+        for (int i = 0; i < names.Length; i++)
+        {
+            Transform display = readyRoot.Find(names[i] + " Ready Display");
+            display.position = new Vector3(-6.4f + i * 3.2f, 0f, 0f);
+        }
+        Transform oldSelection = canvas.transform.Find("Roster Selection");
+        if (oldSelection != null) Object.DestroyImmediate(oldSelection.gameObject);
+        var oldCards = new System.Collections.Generic.List<GameObject>();
+        foreach (Transform child in canvas.transform)
+            if (child.name.Contains("Ready Card")) oldCards.Add(child.gameObject);
+        foreach (GameObject oldCard in oldCards) Object.DestroyImmediate(oldCard);
+        var selectionRoot = new GameObject("Roster Selection", typeof(RectTransform));
+        selectionRoot.transform.SetParent(canvas.transform, false);
+        Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        controller.characterNames = names;
+        controller.characterButtons = new Button[5];
+        controller.selectionText = Label(selectionRoot.transform, "Selection Count", font,
+            new Vector2(650, 32), new Vector2(0, -224), 18, TextAnchor.MiddleCenter);
+        for (int i = 0; i < names.Length; i++)
+            controller.characterButtons[i] = StyledButton(selectionRoot.transform, names[i] + " Selector", font,
+                new Vector2(175, 52), new Vector2(-380 + i * 190, -275),
+                new Color(0.10f, 0.36f, 0.58f, 1f), 17);
+        controller.backButton = StyledButton(selectionRoot.transform, "BACK TO LEVELS", font,
+            new Vector2(220, 52), new Vector2(-665, 385), new Color(0.12f, 0.28f, 0.45f, 1f), 17);
+        controller.titleText = GameObject.Find("Ready Title")?.GetComponent<Text>();
+        EditorSceneManager.MarkSceneDirty(scene);
+        EditorSceneManager.SaveScene(scene);
+    }
+
+    private static void BuildLevelSelectionScene()
+    {
+        var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+        Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        Color pale = new Color(0.82f, 0.93f, 0.98f, 1f);
+        Color navy = new Color(0.06f, 0.20f, 0.34f, 0.96f);
+        Color blue = new Color(0.10f, 0.58f, 0.82f, 1f);
+        var camera = new GameObject("Main Camera", typeof(Camera), typeof(AudioListener));
+        camera.tag = "MainCamera";
+        camera.GetComponent<Camera>().backgroundColor = pale;
+        var canvasObject = new GameObject("Level Selection Canvas", typeof(RectTransform), typeof(Canvas),
+            typeof(CanvasScaler), typeof(GraphicRaycaster));
+        Canvas canvas = canvasObject.GetComponent<Canvas>();
+        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        CanvasScaler scaler = canvasObject.GetComponent<CanvasScaler>();
+        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        scaler.referenceResolution = new Vector2(1600, 900);
+        scaler.matchWidthOrHeight = 0.5f;
+        Panel(canvasObject.transform, "Background", new Vector2(1600, 900), new Vector2(0.5f, 0.5f), pale)
+            .GetComponent<Image>().raycastTarget = false;
+        var header = Panel(canvasObject.transform, "Header", new Vector2(1600, 72), new Vector2(0.5f, 0.5f),
+            new Color(0.96f, 0.98f, 1f, 1f));
+        header.GetComponent<RectTransform>().anchoredPosition = new Vector2(0, 414);
+        Label(header.transform, "Title", font, new Vector2(520, 60), new Vector2(-500, 0), 30,
+            TextAnchor.MiddleLeft).text = "‹   SELECT EPISODE";
+        var chapter = Panel(canvasObject.transform, "Chapter Panel", new Vector2(500, 690),
+            new Vector2(0.5f, 0.5f), new Color(0.68f, 0.86f, 0.94f, 0.75f));
+        chapter.GetComponent<RectTransform>().anchoredPosition = new Vector2(-520, -20);
+        Label(chapter.transform, "Chapter", font, new Vector2(420, 90), new Vector2(0, 190), 34,
+            TextAnchor.MiddleLeft).text = "CHAPTER 1\nTACTICAL ASSAULT";
+        Label(chapter.transform, "Description", font, new Vector2(420, 220), new Vector2(0, 35), 20,
+            TextAnchor.UpperLeft).text = "Deploy four students, advance through each combat section, and defeat the stage boss.\n\nClear stages to unlock the next episode.";
+        var listHeader = Panel(canvasObject.transform, "Episode List Header", new Vector2(720, 58),
+            new Vector2(0.5f, 0.5f), navy);
+        listHeader.GetComponent<RectTransform>().anchoredPosition = new Vector2(350, 320);
+        Label(listHeader.transform, "Text", font, new Vector2(660, 50), Vector2.zero, 23,
+            TextAnchor.MiddleLeft).text = "EPISODE LIST";
+        var controllerObject = new GameObject("Level Selection Director", typeof(LevelSelectionController));
+        LevelSelectionController controller = controllerObject.GetComponent<LevelSelectionController>();
+        controller.levelCards = new LevelCardUI[3];
+        for (int i = 0; i < 3; i++)
+        {
+            var card = Panel(canvasObject.transform, "Level " + (i + 1) + " Card", new Vector2(780, 175),
+                new Vector2(0.5f, 0.5f), new Color(0.95f, 0.98f, 1f, 0.98f));
+            card.GetComponent<RectTransform>().anchoredPosition = new Vector2(380, 185 - i * 190);
+            LevelCardUI cardUI = card.AddComponent<LevelCardUI>();
+            var imageSlot = Panel(card.transform, "Assignable Level Image", new Vector2(220, 135),
+                new Vector2(0.5f, 0.5f), new Color(0.58f, 0.78f, 0.88f, 1f));
+            imageSlot.GetComponent<RectTransform>().anchoredPosition = new Vector2(-260, 0);
+            cardUI.levelImage = imageSlot.GetComponent<Image>();
+            Text placeholder = Label(imageSlot.transform, "Placeholder", font, new Vector2(190, 70), Vector2.zero, 16,
+                TextAnchor.MiddleCenter);
+            placeholder.text = "ASSIGN LEVEL IMAGE\nIN INSPECTOR";
+            cardUI.imagePlaceholder = placeholder.gameObject;
+            cardUI.levelNameText = Label(card.transform, "Level Name", font, new Vector2(420, 48),
+                new Vector2(100, 48), 23, TextAnchor.MiddleLeft);
+            cardUI.starsText = Label(card.transform, "Stars", font, new Vector2(260, 46),
+                new Vector2(20, -18), 27, TextAnchor.MiddleLeft);
+            cardUI.selectButton = StyledButton(card.transform, "ENTER", font, new Vector2(190, 58),
+                new Vector2(240, -48), blue, 20);
+            cardUI.stateText = cardUI.selectButton.GetComponentInChildren<Text>();
+            cardUI.lockOverlay = Panel(card.transform, "Lock Overlay", new Vector2(780, 175),
+                new Vector2(0.5f, 0.5f), new Color(0.25f, 0.31f, 0.36f, 0.72f));
+            Label(cardUI.lockOverlay.transform, "Lock", font, new Vector2(300, 70), new Vector2(215, 0),
+                24, TextAnchor.MiddleCenter).text = "🔒  LOCKED";
+            controller.levelCards[i] = cardUI;
+        }
+        new GameObject("EventSystem", typeof(EventSystem), typeof(StandaloneInputModule));
+        EditorSceneManager.SaveScene(scene, "Assets/Scenes/LevelSelection.unity");
+    }
+
     private static void AttachWorldUnitHUDs()
     {
         Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        const string catalogPath = "Assets/StatusIconCatalog.asset";
+        StatusIconCatalog catalog = AssetDatabase.LoadAssetAtPath<StatusIconCatalog>(catalogPath);
+        if (catalog == null)
+        {
+            catalog = ScriptableObject.CreateInstance<StatusIconCatalog>();
+            AssetDatabase.CreateAsset(catalog, catalogPath);
+        }
         foreach (CombatUnit unit in Object.FindObjectsByType<CombatUnit>(FindObjectsSortMode.None))
         {
             Transform old = unit.transform.Find("World Unit HUD");
@@ -475,10 +812,10 @@ public static class BuildPlayableScene
             var root = new GameObject("World Unit HUD", typeof(RectTransform), typeof(Canvas),
                 typeof(CanvasScaler), typeof(WorldUnitHUD));
             root.transform.SetParent(unit.transform, false);
-            root.transform.localPosition = new Vector3(0f, 2.65f, 0f);
+            root.transform.localPosition = new Vector3(0f, 2.8f, 0f);
             root.transform.localScale = Vector3.one * 0.01f;
             var rect = root.GetComponent<RectTransform>();
-            rect.sizeDelta = new Vector2(220f, 92f);
+            rect.sizeDelta = new Vector2(240f, 125f);
             var canvas = root.GetComponent<Canvas>();
             canvas.renderMode = RenderMode.WorldSpace;
             canvas.sortingOrder = 20;
@@ -486,13 +823,30 @@ public static class BuildPlayableScene
             scaler.dynamicPixelsPerUnit = 15f;
             var hud = root.GetComponent<WorldUnitHUD>();
             hud.unit = unit;
+            hud.statusIconCatalog = catalog;
             hud.unitName = Label(root.transform, "Unit Name", font, new Vector2(210, 30),
-                new Vector2(0, 28), 22, TextAnchor.MiddleCenter);
+                new Vector2(0, 48), 22, TextAnchor.MiddleCenter);
             hud.unitName.fontStyle = FontStyle.Bold;
             hud.healthSlider = CreateSlider(root.transform, "Health", new Vector2(190, 18),
-                new Vector2(0, 2), unit.team == CombatUnit.CombatTeam.Player
+                new Vector2(0, -8), unit.team == CombatUnit.CombatTeam.Player
                     ? new Color(0.12f, 0.78f, 1f, 1f) : new Color(1f, 0.22f, 0.18f, 1f));
             hud.healthFill = hud.healthSlider.fillRect.GetComponent<Image>();
+            var statusRoot = new GameObject("Status Icons", typeof(RectTransform));
+            statusRoot.transform.SetParent(root.transform, false);
+            hud.statusContainer = statusRoot.GetComponent<RectTransform>();
+            hud.statusContainer.sizeDelta = new Vector2(220, 26);
+            hud.statusContainer.anchoredPosition = new Vector2(0, 17);
+            hud.statusIcons = new Image[8];
+            for (int i = 0; i < hud.statusIcons.Length; i++)
+            {
+                var icon = new GameObject("Status Icon " + (i + 1), typeof(RectTransform),
+                    typeof(CanvasRenderer), typeof(Image));
+                icon.transform.SetParent(statusRoot.transform, false);
+                Image image = icon.GetComponent<Image>();
+                image.raycastTarget = false;
+                image.gameObject.SetActive(false);
+                hud.statusIcons[i] = image;
+            }
             hud.damageLabels = new Text[5];
             for (int i = 0; i < hud.damageLabels.Length; i++)
             {

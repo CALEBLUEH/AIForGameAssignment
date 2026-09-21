@@ -5,17 +5,18 @@ public class CoverPoint : MonoBehaviour
 {
     public static readonly List<CoverPoint> All = new List<CoverPoint>();
     public float protection = 0.35f;
-    public bool IsAvailable => occupant == null && !abandoned;
-    public bool IsAbandoned => abandoned;
+    [Header("Usable Cover settings")]
+    public float occupancyRadius = 0.45f;
+    public bool IsAvailable => occupant == null;
+    public bool IsAbandoned => false;
     private CombatUnit occupant;
-    private bool abandoned;
 
     private void OnEnable() { if (!All.Contains(this)) All.Add(this); }
     private void OnDisable() { All.Remove(this); Release(occupant); }
 
     public bool TryReserve(CombatUnit unit)
     {
-        if (unit == null || abandoned || (occupant != null && occupant != unit)) return false;
+        if (unit == null || (occupant != null && occupant != unit)) return false;
         occupant = unit;
         return true;
     }
@@ -36,6 +37,11 @@ public class CoverPoint : MonoBehaviour
     public void Abandon(CombatUnit unit)
     {
         Release(unit);
-        abandoned = true;
+    }
+
+    private void OnDrawGizmosSelected()
+    {
+        Gizmos.color = new Color(0.1f, 0.8f, 1f, 0.8f);
+        Gizmos.DrawWireSphere(transform.position, occupancyRadius);
     }
 }

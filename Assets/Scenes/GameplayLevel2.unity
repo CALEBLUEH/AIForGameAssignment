@@ -9710,8 +9710,8 @@ MonoBehaviour:
   team: 1
   isBoss: 0
   isElite: 1
-  maxHealth: 160
-  attackPower: 23
+  maxHealth: 185
+  attackPower: 28
   defense: 5
   attackRange: 5
   attackSpeed: 1
@@ -9773,12 +9773,15 @@ MonoBehaviour:
   expensiveAoeMinimumEnemyCount: 3
   autoDecisionInterval: 0.4
   selfAbilityEffects:
-  - type: 0
+  - type: 4
     amount: 6
     duration: 7
-  targetAbilityEffects: []
+  targetAbilityEffects:
+  - type: 6
+    amount: 5
+    duration: 7
   allyAbilityEffects: []
-  enemyAbilityCooldown: 8.5
+  enemyAbilityCooldown: 8
   enemyAbilityRange: 8
   allyBuffMaxTargets: 3
   basicAttacksBeforeFinisher: 2
@@ -12119,7 +12122,7 @@ MonoBehaviour:
   autoButton: {fileID: 827641090}
   resumeButton: {fileID: 1810640545}
   backButton: {fileID: 256832859}
-  levelNumber: 1
+  levelNumber: 2
   universalCapacity: 100
   universalRegeneration: 8
   healCost: 25
@@ -12128,19 +12131,22 @@ MonoBehaviour:
   timedEnemyDelay: 18
   startImmediately: 1
   preparationSceneName: Preparation
-  bossName: Boss 1
-  bossHealth: 700
-  bossAttack: 43
-  bossDefense: 14
+  bossName: Boss 2
+  bossHealth: 820
+  bossAttack: 50
+  bossDefense: 17
   bossSelfEffects:
-  - type: 4
-    amount: 8
+  - type: 5
+    amount: 0.25
     duration: 8
   bossTargetEffects:
-  - type: 2
-    amount: 8
+  - type: 6
+    amount: 7
+    duration: 8
+  bossAllyEffects:
+  - type: 4
+    amount: 6
     duration: 7
-  bossAllyEffects: []
   bossAbilityCooldown: 9
   universalPoints: 0
   isPlaying: 0
@@ -24463,8 +24469,8 @@ MonoBehaviour:
   team: 1
   isBoss: 0
   isElite: 0
-  maxHealth: 115
-  attackPower: 23
+  maxHealth: 140
+  attackPower: 28
   defense: 5
   attackRange: 5
   attackSpeed: 1
@@ -24526,12 +24532,15 @@ MonoBehaviour:
   expensiveAoeMinimumEnemyCount: 3
   autoDecisionInterval: 0.4
   selfAbilityEffects:
-  - type: 0
+  - type: 4
     amount: 6
     duration: 7
-  targetAbilityEffects: []
+  targetAbilityEffects:
+  - type: 6
+    amount: 5
+    duration: 7
   allyAbilityEffects: []
-  enemyAbilityCooldown: 8.5
+  enemyAbilityCooldown: 8
   enemyAbilityRange: 8
   allyBuffMaxTargets: 3
   basicAttacksBeforeFinisher: 2
@@ -29781,8 +29790,8 @@ MonoBehaviour:
   team: 1
   isBoss: 0
   isElite: 0
-  maxHealth: 115
-  attackPower: 23
+  maxHealth: 140
+  attackPower: 28
   defense: 5
   attackRange: 5
   attackSpeed: 1
@@ -29843,13 +29852,16 @@ MonoBehaviour:
   aoeMinimumEnemyCount: 2
   expensiveAoeMinimumEnemyCount: 3
   autoDecisionInterval: 0.4
-  selfAbilityEffects: []
+  selfAbilityEffects:
+  - type: 4
+    amount: 6
+    duration: 7
   targetAbilityEffects:
-  - type: 2
+  - type: 6
     amount: 5
-    duration: 6
+    duration: 7
   allyAbilityEffects: []
-  enemyAbilityCooldown: 8.5
+  enemyAbilityCooldown: 8
   enemyAbilityRange: 8
   allyBuffMaxTargets: 3
   basicAttacksBeforeFinisher: 2

@@ -20,24 +20,34 @@ public class BattleDirector : MonoBehaviour
     public Button leaderButton, startButton, moveButton, skillButton, healButton, coverButton, restartButton;
     public Button pauseButton, speedButton, autoButton, resumeButton, backButton;
     [Header("Stage")]
+    [Range(1, 3)] public int levelNumber = 1;
     public float universalCapacity = 100f, universalRegeneration = 8f;
     public float healCost = 25f, coverCost = 35f;
     public int waveTwoCount = 4;
     public float timedEnemyDelay = 18f;
     public bool startImmediately;
     public string preparationSceneName = "Preparation";
+    [Header("Boss configuration")]
+    public string bossName = "Boss 1";
+    public float bossHealth = 650f, bossAttack = 42f, bossDefense = 14f;
+    public StatusEffectSpec[] bossSelfEffects;
+    public StatusEffectSpec[] bossTargetEffects;
+    public StatusEffectSpec[] bossAllyEffects;
+    public float bossAbilityCooldown = 8f;
     [SerializeField] private float universalPoints;
     [SerializeField] private bool isPlaying;
     private readonly List<AutoCombatAI> squad = new List<AutoCombatAI>();
     private readonly List<CombatUnit> initialEnemies = new List<CombatUnit>();
+    private readonly List<GameObject> enemyTemplates = new List<GameObject>();
+    private readonly List<int> deployedIndices = new List<int>();
+    private readonly HashSet<int> deployedUnitIds = new HashSet<int>();
     private bool[] selected;
-    private int leaderIndex, selectedIndex, wave = 1;
+    private int leaderIndex, selectedIndex, wave = 1, enemySpawnIndex, playerDeaths;
     private float elapsed;
     private bool finished;
     private bool paused;
     private int speedLevel = 1;
     [SerializeField] private bool autoEnabled = true;
-    private GameObject enemyTemplate;
     private CombatUnit boss;
     private float nextPhaseTime;
     private enum StagePhase { WaveOne, MovingToWaveTwo, WaveTwo, MovingToBoss, Boss }
@@ -53,6 +63,7 @@ public class BattleDirector : MonoBehaviour
         Instance = this;
         Time.timeScale = 1f;
         AudioSettingsUI.ApplySavedVolume();
+        CombatUnit.UnitDied += OnUnitDied;
         universalPoints = universalCapacity;
         foreach (var ai in FindObjectsByType<AutoCombatAI>(FindObjectsSortMode.None))
         {
@@ -60,14 +71,22 @@ public class BattleDirector : MonoBehaviour
             if (combatUnit.team == CombatUnit.CombatTeam.Player) squad.Add(ai);
             else initialEnemies.Add(combatUnit);
         }
-        squad.Sort((a, b) => string.CompareOrdinal(a.name, b.name));
+        squad.Sort((a, b) => a.rosterOrder.CompareTo(b.rosterOrder));
         selected = new bool[squad.Count];
-        for (int i = 0; i < selected.Length; i++) selected[i] = true;
-        if (initialEnemies.Count > 0)
+        for (int i = 0; i < selected.Length; i++)
+            selected[i] = startImmediately ? GameProgress.IsCharacterSelected(squad[i].name) : i < 4;
+        int selectedCount = 0;
+        foreach (bool value in selected) if (value) selectedCount++;
+        if (selectedCount != Mathf.Min(4, squad.Count))
+            for (int i = 0; i < selected.Length; i++) selected[i] = i < 4;
+        leaderIndex = System.Array.FindIndex(selected, value => value);
+        if (leaderIndex < 0) leaderIndex = 0;
+        foreach (CombatUnit initialEnemy in initialEnemies)
         {
-            enemyTemplate = Instantiate(initialEnemies[0].gameObject, transform);
-            enemyTemplate.name = "Enemy Spawn Template";
-            enemyTemplate.SetActive(false);
+            GameObject template = Instantiate(initialEnemy.gameObject, transform);
+            template.name = initialEnemy.name + " Spawn Template";
+            template.SetActive(false);
+            enemyTemplates.Add(template);
         }
         BindButtons();
         setupPanel.SetActive(true);
@@ -82,13 +101,19 @@ public class BattleDirector : MonoBehaviour
         if (startImmediately) StartBattle();
     }
 
+    private void OnDestroy()
+    {
+        CombatUnit.UnitDied -= OnUnitDied;
+        if (Instance == this) Instance = null;
+    }
+
     private void BindButtons()
     {
         for (int i = 0; i < setupButtons.Length; i++)
         {
             int index = i;
             setupButtons[i].onClick.AddListener(() => ToggleMember(index));
-            squadButtons[i].onClick.AddListener(() => SelectMember(index));
+            squadButtons[i].onClick.AddListener(() => SelectDeployedSlot(index));
         }
         leaderButton.onClick.AddListener(CycleLeader);
         startButton.onClick.AddListener(StartBattle);
@@ -144,9 +169,16 @@ public class BattleDirector : MonoBehaviour
 
     private void StartBattle()
     {
+        deployedIndices.Clear();
+        deployedUnitIds.Clear();
+        playerDeaths = 0;
+        if (leaderIndex >= selected.Length || !selected[leaderIndex])
+            leaderIndex = System.Array.FindIndex(selected, value => value);
         for (int i = 0; i < squad.Count; i++)
         {
             if (!selected[i]) { squad[i].gameObject.SetActive(false); continue; }
+            deployedIndices.Add(i);
+            deployedUnitIds.Add(squad[i].Unit.GetInstanceID());
             var member = squad[i].GetComponent<SquadMember>();
             if (i == leaderIndex)
             {
@@ -161,6 +193,12 @@ public class BattleDirector : MonoBehaviour
         setupPanel.SetActive(false);
         battlePanel.SetActive(true);
         RefreshBattle();
+    }
+
+    private void OnUnitDied(CombatUnit deadUnit)
+    {
+        if (deadUnit != null && deadUnit.team == CombatUnit.CombatTeam.Player &&
+            deployedUnitIds.Contains(deadUnit.GetInstanceID())) playerDeaths++;
     }
 
     private void Update()
@@ -217,8 +255,9 @@ public class BattleDirector : MonoBehaviour
 
     private void SpawnEnemy(Vector3 position)
     {
-        if (enemyTemplate == null) return;
-        var clone = Instantiate(enemyTemplate, position, Quaternion.identity);
+        if (enemyTemplates.Count == 0) return;
+        GameObject template = enemyTemplates[enemySpawnIndex++ % enemyTemplates.Count];
+        var clone = Instantiate(template, position, Quaternion.identity);
         clone.name = "Wave " + wave + " Enemy";
         clone.transform.SetParent(null);
         clone.SetActive(true);
@@ -226,16 +265,24 @@ public class BattleDirector : MonoBehaviour
 
     private void SpawnBoss()
     {
-        if (enemyTemplate == null) return;
-        GameObject clone = Instantiate(enemyTemplate, new Vector3(57f, 1f, 0f), Quaternion.identity);
-        clone.name = "Section Boss";
+        if (enemyTemplates.Count == 0) return;
+        GameObject clone = Instantiate(enemyTemplates[0], new Vector3(57f, 1f, 0f), Quaternion.identity);
+        clone.name = bossName;
         clone.transform.SetParent(null);
         clone.transform.localScale = Vector3.one * 2.2f;
         clone.SetActive(true);
         boss = clone.GetComponent<CombatUnit>();
-        boss.ConfigureSpawn(650f, 42f, 14f, true);
+        boss.ConfigureSpawn(bossHealth, bossAttack, bossDefense, true);
+        boss.isElite = true;
         boss.attackRange = 6.5f;
         boss.attackSpeed = 0.7f;
+        clone.GetComponent<AutoCombatAI>().ConfigureEnemyAbilities(
+            bossSelfEffects, bossTargetEffects, bossAllyEffects, bossAbilityCooldown);
+    }
+
+    private void SelectDeployedSlot(int slot)
+    {
+        if (slot >= 0 && slot < deployedIndices.Count) SelectMember(deployedIndices[slot]);
     }
 
     private void SelectMember(int index)
@@ -335,7 +382,9 @@ public class BattleDirector : MonoBehaviour
         if (targetMode == TargetMode.Move) used = Selected.TryMovementSkill(pointer);
         else if (targetMode == TargetMode.Skill)
         {
-            CombatUnit target = Selected.characterSkillKind == AutoCombatAI.CharacterSkillKind.PowerUp
+            bool selfSkill = Selected.characterSkillKind == AutoCombatAI.CharacterSkillKind.PowerUp ||
+                Selected.characterSkillKind == AutoCombatAI.CharacterSkillKind.Defensive;
+            CombatUnit target = selfSkill
                 ? null : FindSkillTarget(pointer);
             used = Selected.TryCharacterSkill(target);
             if (target != null) feedbackPosition = target.transform.position;
@@ -388,7 +437,8 @@ public class BattleDirector : MonoBehaviour
         if (mode == TargetMode.Move) targetingFeedback.ShowArrow(Selected.transform, Selected.movementRange);
         else
         {
-            bool ranged = Selected.characterSkillKind != AutoCombatAI.CharacterSkillKind.PowerUp;
+            bool ranged = Selected.characterSkillKind != AutoCombatAI.CharacterSkillKind.PowerUp &&
+                Selected.characterSkillKind != AutoCombatAI.CharacterSkillKind.Defensive;
             targetingFeedback.ShowRange(Selected.transform, ranged ? Selected.skillRange : 2.2f, ranged);
         }
     }
@@ -470,13 +520,14 @@ public class BattleDirector : MonoBehaviour
             bossHealthSlider.value = boss.CurrentHealth;
             if (bossNameText != null) bossNameText.text = boss.name;
         }
-        for (int i = 0; i < squadButtons.Length && i < squad.Count; i++)
+        for (int i = 0; i < squadButtons.Length; i++)
         {
-            AutoCombatAI member = squad[i];
+            AutoCombatAI member = i < deployedIndices.Count ? squad[deployedIndices[i]] : null;
             bool alive = member != null && member.Unit != null && !member.Unit.IsDead;
             squadButtons[i].interactable = alive;
-            squadButtons[i].GetComponentInChildren<Text>().text = (i == selectedIndex && alive ? "▶ " : "") +
-                (alive ? member.name : "DOWN");
+            bool isSelected = alive && deployedIndices[i] == selectedIndex;
+            squadButtons[i].GetComponentInChildren<Text>().text = (isSelected ? "▶ " : "") +
+                (alive ? member.name : i < deployedIndices.Count ? "DOWN" : "EMPTY");
         }
     }
 
@@ -534,7 +585,11 @@ public class BattleDirector : MonoBehaviour
         isPlaying = false;
         ExitTargeting();
         Time.timeScale = 1f;
-        resultText.text = won ? "VICTORY\nThe assault is complete." : "DEFEAT\nYour squad has fallen.";
+        int stars = playerDeaths == 0 ? 3 : playerDeaths == 1 ? 2 : 1;
+        if (won) GameProgress.CompleteLevel(levelNumber, stars);
+        resultText.text = won ? "VICTORY\n" + new string('★', stars) + new string('☆', 3 - stars) +
+            "\n" + playerDeaths + " deployed character" + (playerDeaths == 1 ? "" : "s") + " lost" :
+            "DEFEAT\nYour squad has fallen.";
         battlePanel.SetActive(false);
         resultPanel.SetActive(true);
     }
