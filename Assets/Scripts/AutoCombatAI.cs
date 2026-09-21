@@ -23,6 +23,8 @@ public class AutoCombatAI : MonoBehaviour
     public float separationStrength = 0.7f;
     [Header("Cover")]
     public float coverDetectionRange = 12f;
+    public float coverRetryDelay = 2f;
+    public float coverFiringRangeMultiplier = 1.15f;
     [Header("Character skill balance")]
     public float characterSkillCost = 40f, characterSkillCooldown = 10f, skillRange = 6f;
     public float skillPowerMultiplier = 2.5f, skillHealAmount = 35f, aoeRadius = 4f;
@@ -57,6 +59,8 @@ public class AutoCombatAI : MonoBehaviour
     private Vector3 skillDestination;
     private float skillSpeed;
     private CoverPoint coverPoint;
+    private CoverPoint rejectedCoverPoint;
+    private float rejectedCoverUntil;
     public string CurrentState => currentState;
     public CombatUnit Unit => unit;
     public float MovementCooldownRemaining => Mathf.Max(0f, movementReadyAt - Time.time);
@@ -241,7 +245,8 @@ public class AutoCombatAI : MonoBehaviour
             }
             coverPoint.Occupy(unit);
             if (Distance(transform.position, currentTarget.transform.position) <= unit.AttackRange && HasSight(currentTarget)) return false;
-            coverPoint.Abandon(unit); coverPoint = null;
+            RejectCurrentCover();
+            return false;
         }
         float targetDistance = Distance(transform.position, currentTarget.transform.position);
         if (targetDistance <= unit.AttackRange) return false;
@@ -251,10 +256,14 @@ public class AutoCombatAI : MonoBehaviour
         foreach (CoverPoint candidate in CoverPoint.All)
         {
             if (!candidate.IsAvailable) continue;
+            if (candidate == rejectedCoverPoint && Time.time < rejectedCoverUntil) continue;
             Vector3 toCover = candidate.transform.position - transform.position; toCover.y = 0f;
             float distance = toCover.magnitude;
             if (distance >= bestDistance || Vector3.Dot(towardEnemy, toCover.normalized) < 0.2f) continue;
             if (Distance(candidate.transform.position, currentTarget.transform.position) >= targetDistance) continue;
+            if (Distance(candidate.transform.position, currentTarget.transform.position) >
+                unit.AttackRange * Mathf.Max(1f, coverFiringRangeMultiplier)) continue;
+            if (!HasSightFrom(candidate.transform.position, currentTarget)) continue;
             best = candidate; bestDistance = distance;
         }
         if (best == null || !best.TryReserve(unit)) return false;
@@ -265,6 +274,15 @@ public class AutoCombatAI : MonoBehaviour
     {
         if (coverPoint == null) return;
         coverPoint.Release(unit); coverPoint = null;
+    }
+
+    private void RejectCurrentCover()
+    {
+        if (coverPoint == null) return;
+        rejectedCoverPoint = coverPoint;
+        rejectedCoverUntil = Time.time + Mathf.Max(0.1f, coverRetryDelay);
+        coverPoint.Abandon(unit);
+        coverPoint = null;
     }
 
     private void FindTarget()
@@ -279,8 +297,18 @@ public class AutoCombatAI : MonoBehaviour
         }
     }
 
-    private bool HasSight(CombatUnit target) => !Physics.Linecast(transform.position + Vector3.up,
-        target.transform.position + Vector3.up, sightBlockers, QueryTriggerInteraction.Ignore);
+    private bool HasSight(CombatUnit target) => HasSightFrom(transform.position, target);
+
+    private bool HasSightFrom(Vector3 origin, CombatUnit target)
+    {
+        if (target == null) return false;
+        // Keep the ray above waist-high usable cover while taller blocking obstacles
+        // still stop attacks and trigger path-based repositioning.
+        const float sightHeight = 1.5f;
+        return !Physics.Linecast(origin + Vector3.up * sightHeight,
+            target.transform.position + Vector3.up * sightHeight,
+            sightBlockers, QueryTriggerInteraction.Ignore);
+    }
 
     private void Navigate(Vector3 destination, float stopDistance)
     {
