@@ -192,7 +192,8 @@ public class AutoCombatAI : MonoBehaviour
         ReleaseCover();
         Vector3 delta = destination - transform.position; delta.y = 0f;
         destination = transform.position + Vector3.ClampMagnitude(delta, movementRange);
-        if (!NavMesh.SamplePosition(destination, out var hit, 2f, NavMesh.AllAreas))
+        if (!NavMesh.SamplePosition(transform.position, out var start, 2f, NavMesh.AllAreas) ||
+            !NavMesh.SamplePosition(destination, out var hit, 3f, NavMesh.AllAreas))
         { unit.RefundMovementPoints(movementCost); return false; }
         if (movementKind == MovementKind.Flash)
         {
@@ -205,8 +206,13 @@ public class AutoCombatAI : MonoBehaviour
         if (movementKind == MovementKind.Dash &&
             Physics.Linecast(transform.position + Vector3.up, hit.position + Vector3.up, sightBlockers))
         { unit.RefundMovementPoints(movementCost); return false; }
-        nextPath = 0f; Navigate(hit.position, 0f);
-        if (!HasPath()) { unit.RefundMovementPoints(movementCost); return false; }
+        var movementPath = new NavMeshPath();
+        if (!NavMesh.CalculatePath(start.position, hit.position, NavMesh.AllAreas, movementPath) ||
+            movementPath.status != NavMeshPathStatus.PathComplete || movementPath.corners.Length < 2)
+        { unit.RefundMovementPoints(movementCost); return false; }
+        path = movementPath;
+        corner = 1;
+        nextPath = Time.time + pathUpdateInterval;
         skillDestination = hit.position;
         skillSpeed = movementKind == MovementKind.Charge ? 12f : 18f;
         skillMoving = true; currentState = movementKind.ToString();

@@ -9,6 +9,7 @@ public class SkillTargetingFeedback : MonoBehaviour
     private float radius;
     private bool showRange;
     private bool showArrow;
+    private bool rangeFollowsPointer;
     private Vector3 pointer;
 
     private void Awake()
@@ -21,7 +22,8 @@ public class SkillTargetingFeedback : MonoBehaviour
         if (source == null) return;
         if (showRange && rangeRenderer != null)
         {
-            rangeRenderer.transform.position = source.position + Vector3.up * 0.08f;
+            Vector3 center = rangeFollowsPointer ? pointer : source.position;
+            rangeRenderer.transform.position = center + Vector3.up * 0.08f;
             rangeRenderer.transform.localScale = new Vector3(radius * 2f, 0.02f, radius * 2f);
         }
         if (showArrow && arrowRenderer != null)
@@ -38,10 +40,12 @@ public class SkillTargetingFeedback : MonoBehaviour
         }
     }
 
-    public void ShowRange(Transform origin, float skillRadius)
+    public void ShowRange(Transform origin, float skillRadius, bool followPointer = false)
     {
         source = origin;
         radius = skillRadius;
+        pointer = origin.position;
+        rangeFollowsPointer = followPointer;
         showRange = true;
         showArrow = false;
         if (rangeRenderer != null) rangeRenderer.gameObject.SetActive(true);
@@ -52,6 +56,8 @@ public class SkillTargetingFeedback : MonoBehaviour
     {
         source = origin;
         radius = movementRange;
+        pointer = origin.position;
+        rangeFollowsPointer = false;
         showRange = false;
         showArrow = true;
         if (rangeRenderer != null) rangeRenderer.gameObject.SetActive(false);
@@ -63,6 +69,7 @@ public class SkillTargetingFeedback : MonoBehaviour
     public void Hide()
     {
         source = null;
+        rangeFollowsPointer = false;
         showRange = showArrow = false;
         if (rangeRenderer != null) rangeRenderer.gameObject.SetActive(false);
         if (arrowRenderer != null) arrowRenderer.gameObject.SetActive(false);

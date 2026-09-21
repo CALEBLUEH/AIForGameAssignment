@@ -40,7 +40,7 @@ public class BattleDirector : MonoBehaviour
     private float nextPhaseTime;
     private enum StagePhase { WaveOne, MovingToWaveTwo, WaveTwo, MovingToBoss, Boss }
     private StagePhase phase = StagePhase.WaveOne;
-    private enum TargetMode { None, Move, Skill, Cover }
+    private enum TargetMode { None, Move, Skill }
     private TargetMode targetMode;
     public bool IsPlaying => isPlaying;
     public float UniversalPoints => universalPoints;
@@ -86,7 +86,7 @@ public class BattleDirector : MonoBehaviour
         moveButton.onClick.AddListener(() => BeginTargeting(TargetMode.Move));
         skillButton.onClick.AddListener(UseCharacterSkill);
         healButton.onClick.AddListener(UseHeal);
-        coverButton.onClick.AddListener(() => BeginTargeting(TargetMode.Cover));
+        coverButton.onClick.AddListener(UseCover);
         if (pauseButton != null) pauseButton.onClick.AddListener(TogglePause);
         if (speedButton != null) speedButton.onClick.AddListener(CycleSpeed);
         if (autoButton != null) autoButton.onClick.AddListener(ToggleAuto);
@@ -238,54 +238,100 @@ public class BattleDirector : MonoBehaviour
     private void UseCharacterSkill()
     {
         if (Selected == null || Selected.Unit.IsDead) return;
-        if (Selected.characterSkillKind == AutoCombatAI.CharacterSkillKind.PowerUp)
-        {
-            if (Selected.TryCharacterSkill(null) && targetingFeedback != null)
-                targetingFeedback.PlayFeedback(Selected.transform.position, new Color(1f, 0.72f, 0.12f));
-        }
-        else BeginTargeting(TargetMode.Skill);
+        BeginTargeting(TargetMode.Skill);
     }
 
     private void UseHeal()
     {
+        ExitTargeting();
         if (Selected == null || Selected.Unit.IsDead || !TrySpendUniversal(healCost)) return;
         Selected.Unit.Heal(35f);
         if (targetingFeedback != null)
             targetingFeedback.PlayFeedback(Selected.transform.position, new Color(0.2f, 1f, 0.55f));
     }
 
+    private void UseCover()
+    {
+        ExitTargeting();
+        if (Selected == null || Selected.Unit.IsDead || !TrySpendUniversal(coverCost)) return;
+        Vector3 forward = Selected.transform.forward;
+        forward.y = 0f;
+        if (forward.sqrMagnitude < 0.01f) forward = Vector3.right;
+        Vector3 position = Selected.transform.position + forward.normalized * 2f;
+        position.y = 0f;
+        var block = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        block.name = "Placed Cover";
+        block.transform.position = position + Vector3.up * 0.9f;
+        block.transform.rotation = Quaternion.LookRotation(forward);
+        block.transform.localScale = new Vector3(2.5f, 1.8f, 0.7f);
+        block.layer = 8;
+        var obstacle = block.AddComponent<NavMeshObstacle>();
+        obstacle.carving = true;
+        if (targetingFeedback != null)
+            targetingFeedback.PlayFeedback(position, new Color(0.25f, 0.75f, 1f));
+    }
+
     private void HandleWorldClick()
     {
         if (Selected == null || Selected.Unit.IsDead) { ExitTargeting(); return; }
+        if (Camera.main == null) { ExitTargeting(); return; }
         Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
-        if (!Physics.Raycast(ray, out RaycastHit hit, 200f)) return;
+        if (!TryGetGroundPoint(ray, out Vector3 pointer)) { ExitTargeting(); return; }
+        ResolveTargetAt(pointer);
+    }
+
+    public bool ResolveTargetAt(Vector3 pointer)
+    {
+        if (targetMode == TargetMode.None || Selected == null || Selected.Unit.IsDead)
+        {
+            ExitTargeting();
+            return false;
+        }
         bool used = false;
-        Vector3 feedbackPosition = hit.point;
-        if (targetMode == TargetMode.Move) used = Selected.TryMovementSkill(hit.point);
+        Vector3 feedbackPosition = pointer;
+        if (targetMode == TargetMode.Move) used = Selected.TryMovementSkill(pointer);
         else if (targetMode == TargetMode.Skill)
         {
-            var target = hit.collider.GetComponentInParent<CombatUnit>();
+            CombatUnit target = Selected.characterSkillKind == AutoCombatAI.CharacterSkillKind.PowerUp
+                ? null : FindSkillTarget(pointer);
             used = Selected.TryCharacterSkill(target);
             if (target != null) feedbackPosition = target.transform.position;
         }
-        else if (targetMode == TargetMode.Cover &&
-            FlatDistance(Selected.transform.position, hit.point) <= 9f &&
-            TrySpendUniversal(coverCost))
-        {
-            var block = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            block.name = "Placed Cover";
-            block.transform.position = hit.point + Vector3.up * 0.9f;
-            block.transform.localScale = new Vector3(2.5f, 1.8f, 0.7f);
-            block.layer = 8;
-            var obstacle = block.AddComponent<NavMeshObstacle>();
-            obstacle.carving = true;
-            used = true;
-        }
-        if (!used) return;
-        if (targetingFeedback != null)
-            targetingFeedback.PlayFeedback(feedbackPosition,
-                targetMode == TargetMode.Cover ? new Color(0.25f, 0.75f, 1f) : new Color(1f, 0.65f, 0.1f));
+        if (used && targetingFeedback != null)
+            targetingFeedback.PlayFeedback(feedbackPosition, new Color(1f, 0.65f, 0.1f));
         ExitTargeting();
+        return used;
+    }
+
+    private CombatUnit FindSkillTarget(Vector3 pointer)
+    {
+        CombatUnit best = null;
+        float bestPointerDistance = float.PositiveInfinity;
+        bool wantsAlly = Selected.characterSkillKind == AutoCombatAI.CharacterSkillKind.Heal;
+        foreach (CombatUnit candidate in FindObjectsByType<CombatUnit>(FindObjectsSortMode.None))
+        {
+            if (candidate.IsDead || (candidate.team == Selected.Unit.team) != wantsAlly ||
+                FlatDistance(Selected.transform.position, candidate.transform.position) > Selected.skillRange) continue;
+            float pointerDistance = FlatDistance(pointer, candidate.transform.position);
+            if (pointerDistance < bestPointerDistance)
+            {
+                best = candidate;
+                bestPointerDistance = pointerDistance;
+            }
+        }
+        return best;
+    }
+
+    private static bool TryGetGroundPoint(Ray ray, out Vector3 point)
+    {
+        var ground = new Plane(Vector3.up, Vector3.zero);
+        if (ground.Raycast(ray, out float distance))
+        {
+            point = ray.GetPoint(distance);
+            return true;
+        }
+        point = default;
+        return false;
     }
 
     private void BeginTargeting(TargetMode mode)
@@ -297,14 +343,18 @@ public class BattleDirector : MonoBehaviour
         Time.timeScale = 0.12f;
         if (targetingFeedback == null) return;
         if (mode == TargetMode.Move) targetingFeedback.ShowArrow(Selected.transform, Selected.movementRange);
-        else targetingFeedback.ShowRange(Selected.transform, mode == TargetMode.Skill ? Selected.skillRange : 9f);
+        else
+        {
+            bool ranged = Selected.characterSkillKind != AutoCombatAI.CharacterSkillKind.PowerUp;
+            targetingFeedback.ShowRange(Selected.transform, ranged ? Selected.skillRange : 2.2f, ranged);
+        }
     }
 
     private void UpdateTargetPointer()
     {
         if (targetMode == TargetMode.None || targetingFeedback == null || Camera.main == null) return;
         Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
-        if (Physics.Raycast(ray, out RaycastHit hit, 200f)) targetingFeedback.SetPointer(hit.point);
+        if (TryGetGroundPoint(ray, out Vector3 pointer)) targetingFeedback.SetPointer(pointer);
     }
 
     private void ExitTargeting()
@@ -360,7 +410,9 @@ public class BattleDirector : MonoBehaviour
             squadText.text = Selected.name + "  HP " + Mathf.CeilToInt(unit.CurrentHealth) + "/" + unit.maxHealth +
                 "  Move " + Mathf.FloorToInt(unit.MovementPoints) + "/" + unit.skillPointCapacity +
                 "  •  " + Selected.CurrentState +
-                (targetMode == TargetMode.None ? "" : "  •  Click a " + (targetMode == TargetMode.Move || targetMode == TargetMode.Cover ? "position" : "target"));
+                (targetMode == TargetMode.None ? "" : "  •  " +
+                    (targetMode == TargetMode.Move ? "Click a move position" :
+                    Selected.characterSkillKind == AutoCombatAI.CharacterSkillKind.PowerUp ? "Click to activate" : "Click near a target"));
             RefreshCooldown(moveCooldownOverlay, moveCooldownText, moveButton,
                 Selected.MovementCooldownRemaining, unit.MovementPoints >= Selected.movementCost);
             RefreshCooldown(skillCooldownOverlay, skillCooldownText, skillButton,

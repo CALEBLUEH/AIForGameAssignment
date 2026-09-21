@@ -440,6 +440,8 @@ public static class BuildPlayableScene
                     throw new System.Exception("Battle did not start from the Canvas button.");
                 director.skillButton.onClick.Invoke();
                 AutoCombatAI aegis = GameObject.Find("Aegis").GetComponent<AutoCombatAI>();
+                if (!director.ResolveTargetAt(aegis.transform.position))
+                    throw new System.Exception("Character skill targeting did not resolve.");
                 if (aegis.CharacterCooldownRemaining <= 0f)
                     throw new System.Exception("Character skill cooldown did not start.");
                 DestroyAllEnemies();
