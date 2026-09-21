@@ -13,6 +13,7 @@ public class AutoCombatAI : MonoBehaviour
     public MovementKind movementKind;
     public CharacterSkillKind characterSkillKind;
     public float movementRange = 7f, movementCost = 35f, characterSkillCost = 40f, skillRange = 6f;
+    public float movementCooldown = 7f, characterSkillCooldown = 10f;
     [Header("Automatic action set")]
     public int basicAttacksBeforeFinisher = 2;
     public float finisherMultiplier = 1.5f;
@@ -23,12 +24,16 @@ public class AutoCombatAI : MonoBehaviour
     private NavMeshPath path;
     private int corner;
     private float nextAttack, nextSearch, nextPath;
+    private float movementReadyAt, characterSkillReadyAt;
     private int actionIndex;
     private bool returning, skillMoving;
     private Vector3 skillDestination;
     private float skillSpeed;
+    private CoverPoint coverPoint;
     public string CurrentState => currentState;
     public CombatUnit Unit => unit;
+    public float MovementCooldownRemaining => Mathf.Max(0f, movementReadyAt - Time.time);
+    public float CharacterCooldownRemaining => Mathf.Max(0f, characterSkillReadyAt - Time.time);
     private void Awake()
     {
         unit = GetComponent<CombatUnit>();
@@ -63,7 +68,14 @@ public class AutoCombatAI : MonoBehaviour
         returning = false;
         if (Time.time >= nextSearch || currentTarget == null || currentTarget.IsDead)
         { FindTarget(); nextSearch = Time.time + targetSearchInterval; }
-        if (currentTarget == null) { ClearPath(); currentState = "Waiting"; return; }
+        if (currentTarget == null)
+        {
+            ReleaseCover();
+            ClearPath();
+            currentState = "Advancing";
+            return;
+        }
+        if (unit.team == CombatUnit.CombatTeam.Player && HandleCover()) return;
         if (Distance(transform.position, currentTarget.transform.position) <= unit.AttackRange && HasSight(currentTarget))
         {
             ClearPath(); Face(currentTarget.transform.position - transform.position);
@@ -84,6 +96,52 @@ public class AutoCombatAI : MonoBehaviour
             Navigate(currentTarget.transform.position, unit.AttackRange * 0.8f);
             Move(movementSpeed);
         }
+    }
+
+    private bool HandleCover()
+    {
+        if (coverPoint != null)
+        {
+            if (!coverPoint.TryReserve(unit)) { coverPoint = null; return false; }
+            if (Distance(transform.position, coverPoint.transform.position) > 0.4f)
+            {
+                currentState = "Taking cover";
+                Navigate(coverPoint.transform.position, 0.15f);
+                Move(movementSpeed);
+                return true;
+            }
+            coverPoint.Occupy(unit);
+            if (Distance(transform.position, currentTarget.transform.position) <= unit.AttackRange &&
+                HasSight(currentTarget)) return false;
+            coverPoint.Abandon(unit);
+            coverPoint = null;
+        }
+        float targetDistance = Distance(transform.position, currentTarget.transform.position);
+        if (targetDistance <= unit.AttackRange) return false;
+        Vector3 towardEnemy = (currentTarget.transform.position - transform.position).normalized;
+        CoverPoint best = null;
+        float bestDistance = 12f;
+        foreach (CoverPoint candidate in CoverPoint.All)
+        {
+            if (!candidate.IsAvailable) continue;
+            Vector3 toCover = candidate.transform.position - transform.position;
+            toCover.y = 0f;
+            float distance = toCover.magnitude;
+            if (distance >= bestDistance || Vector3.Dot(towardEnemy, toCover.normalized) < 0.35f) continue;
+            if (Distance(candidate.transform.position, currentTarget.transform.position) >= targetDistance) continue;
+            best = candidate;
+            bestDistance = distance;
+        }
+        if (best == null || !best.TryReserve(unit)) return false;
+        coverPoint = best;
+        return true;
+    }
+
+    private void ReleaseCover()
+    {
+        if (coverPoint == null) return;
+        coverPoint.Release(unit);
+        coverPoint = null;
     }
     private void FindTarget()
     {
@@ -130,13 +188,20 @@ public class AutoCombatAI : MonoBehaviour
     private void ClearPath() { if (path != null) path.ClearCorners(); corner = 0; }
     public bool TryMovementSkill(Vector3 destination)
     {
-        if (unit.IsDead || !unit.SpendMovementPoints(movementCost)) return false;
+        if (unit.IsDead || MovementCooldownRemaining > 0f || !unit.SpendMovementPoints(movementCost)) return false;
+        ReleaseCover();
         Vector3 delta = destination - transform.position; delta.y = 0f;
         destination = transform.position + Vector3.ClampMagnitude(delta, movementRange);
         if (!NavMesh.SamplePosition(destination, out var hit, 2f, NavMesh.AllAreas))
         { unit.RefundMovementPoints(movementCost); return false; }
         if (movementKind == MovementKind.Flash)
-        { transform.position = hit.position; ClearPath(); currentState = "Flashed"; return true; }
+        {
+            transform.position = hit.position;
+            ClearPath();
+            currentState = "Flashed";
+            movementReadyAt = Time.time + movementCooldown;
+            return true;
+        }
         if (movementKind == MovementKind.Dash &&
             Physics.Linecast(transform.position + Vector3.up, hit.position + Vector3.up, sightBlockers))
         { unit.RefundMovementPoints(movementCost); return false; }
@@ -145,11 +210,12 @@ public class AutoCombatAI : MonoBehaviour
         skillDestination = hit.position;
         skillSpeed = movementKind == MovementKind.Charge ? 12f : 18f;
         skillMoving = true; currentState = movementKind.ToString();
+        movementReadyAt = Time.time + movementCooldown;
         return true;
     }
     public bool TryCharacterSkill(CombatUnit target)
     {
-        if (unit.IsDead || BattleDirector.Instance == null ||
+        if (unit.IsDead || CharacterCooldownRemaining > 0f || BattleDirector.Instance == null ||
             !BattleDirector.Instance.TrySpendUniversal(characterSkillCost)) return false;
         bool used = true;
         switch (characterSkillKind)
@@ -168,8 +234,10 @@ public class AutoCombatAI : MonoBehaviour
                 break;
         }
         if (!used) BattleDirector.Instance.RefundUniversal(characterSkillCost);
+        else characterSkillReadyAt = Time.time + characterSkillCooldown;
         return used;
     }
+    private void OnDisable() { ReleaseCover(); }
     private static float Distance(Vector3 a, Vector3 b)
     { a.y = b.y = 0f; return Vector3.Distance(a, b); }
 }

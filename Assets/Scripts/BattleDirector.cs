@@ -11,6 +11,11 @@ public class BattleDirector : MonoBehaviour
     public GameObject setupPanel, battlePanel, resultPanel;
     public Text setupText, statusText, squadText, resultText, timerText, enemyText, energyText;
     public Image[] energySegments;
+    public Slider manaSlider, bossHealthSlider;
+    public GameObject bossHealthPanel;
+    public Text bossNameText, moveCooldownText, skillCooldownText;
+    public Image moveCooldownOverlay, skillCooldownOverlay;
+    public SkillTargetingFeedback targetingFeedback;
     public Button[] setupButtons, squadButtons;
     public Button leaderButton, startButton, moveButton, skillButton, healButton, coverButton, restartButton;
     public Button pauseButton, speedButton, autoButton;
@@ -26,11 +31,15 @@ public class BattleDirector : MonoBehaviour
     private bool[] selected;
     private int leaderIndex, selectedIndex, wave = 1;
     private float elapsed;
-    private bool timedSpawned, secondWaveSpawned, finished;
+    private bool finished;
     private bool paused;
     private int speedLevel = 1;
     [SerializeField] private bool autoEnabled = true;
     private GameObject enemyTemplate;
+    private CombatUnit boss;
+    private float nextPhaseTime;
+    private enum StagePhase { WaveOne, MovingToWaveTwo, WaveTwo, MovingToBoss, Boss }
+    private StagePhase phase = StagePhase.WaveOne;
     private enum TargetMode { None, Move, Skill, Cover }
     private TargetMode targetMode;
     public bool IsPlaying => isPlaying;
@@ -74,10 +83,10 @@ public class BattleDirector : MonoBehaviour
         }
         leaderButton.onClick.AddListener(CycleLeader);
         startButton.onClick.AddListener(StartBattle);
-        moveButton.onClick.AddListener(() => targetMode = TargetMode.Move);
+        moveButton.onClick.AddListener(() => BeginTargeting(TargetMode.Move));
         skillButton.onClick.AddListener(UseCharacterSkill);
         healButton.onClick.AddListener(UseHeal);
-        coverButton.onClick.AddListener(() => targetMode = TargetMode.Cover);
+        coverButton.onClick.AddListener(() => BeginTargeting(TargetMode.Cover));
         if (pauseButton != null) pauseButton.onClick.AddListener(TogglePause);
         if (speedButton != null) speedButton.onClick.AddListener(CycleSpeed);
         if (autoButton != null) autoButton.onClick.AddListener(ToggleAuto);
@@ -135,6 +144,8 @@ public class BattleDirector : MonoBehaviour
             else if (member != null) member.leader = squad[leaderIndex].transform;
         }
         selectedIndex = leaderIndex;
+        phase = StagePhase.WaveOne;
+        wave = 1;
         isPlaying = true;
         setupPanel.SetActive(false);
         battlePanel.SetActive(true);
@@ -146,22 +157,42 @@ public class BattleDirector : MonoBehaviour
         if (!isPlaying) return;
         elapsed += Time.deltaTime;
         universalPoints = Mathf.Min(universalCapacity, universalPoints + universalRegeneration * Time.deltaTime);
-        if (!timedSpawned && elapsed >= timedEnemyDelay)
-        { timedSpawned = true; SpawnEnemy(new Vector3(18f, 1f, 18f)); }
         int enemies = CountAlive(CombatUnit.CombatTeam.Enemy);
         int allies = CountAlive(CombatUnit.CombatTeam.Player);
         if (allies == 0) { Finish(false); return; }
-        if (!secondWaveSpawned && enemies == 0)
+        if (phase == StagePhase.WaveOne && enemies == 0)
         {
-            secondWaveSpawned = true;
+            phase = StagePhase.MovingToWaveTwo;
+            nextPhaseTime = Time.time + 2f;
+        }
+        else if (phase == StagePhase.MovingToWaveTwo && Time.time >= nextPhaseTime)
+        {
             wave = 2;
             for (int i = 0; i < waveTwoCount; i++)
-                SpawnEnemy(new Vector3(13f + i * 2f, 1f, 16f + (i % 2) * 2f));
+                SpawnEnemy(new Vector3(25f + i * 2.2f, 1f, (i % 2 == 0 ? -3f : 3f)));
+            phase = StagePhase.WaveTwo;
         }
-        else if (secondWaveSpawned && enemies == 0 && timedSpawned) { Finish(true); return; }
+        else if (phase == StagePhase.WaveTwo && enemies == 0)
+        {
+            phase = StagePhase.MovingToBoss;
+            nextPhaseTime = Time.time + 2f;
+        }
+        else if (phase == StagePhase.MovingToBoss && Time.time >= nextPhaseTime)
+        {
+            wave = 3;
+            SpawnBoss();
+            phase = StagePhase.Boss;
+        }
+        else if (phase == StagePhase.Boss && (boss == null || boss.IsDead))
+        {
+            Finish(true);
+            return;
+        }
+        UpdateTargetPointer();
         if (Input.GetMouseButtonDown(0) && targetMode != TargetMode.None &&
             (EventSystem.current == null || !EventSystem.current.IsPointerOverGameObject()))
             HandleWorldClick();
+        if (targetMode != TargetMode.None && Input.GetKeyDown(KeyCode.Escape)) ExitTargeting();
         RefreshBattle();
     }
 
@@ -182,10 +213,24 @@ public class BattleDirector : MonoBehaviour
         clone.SetActive(true);
     }
 
+    private void SpawnBoss()
+    {
+        if (enemyTemplate == null) return;
+        GameObject clone = Instantiate(enemyTemplate, new Vector3(57f, 1f, 0f), Quaternion.identity);
+        clone.name = "Section Boss";
+        clone.transform.SetParent(null);
+        clone.transform.localScale = Vector3.one * 2.2f;
+        clone.SetActive(true);
+        boss = clone.GetComponent<CombatUnit>();
+        boss.ConfigureSpawn(650f, 42f, 14f, true);
+        boss.attackRange = 6.5f;
+        boss.attackSpeed = 0.7f;
+    }
+
     private void SelectMember(int index)
     {
         if (index < squad.Count && squad[index] != null && squad[index].gameObject.activeInHierarchy)
-        { selectedIndex = index; targetMode = TargetMode.None; }
+        { selectedIndex = index; ExitTargeting(); }
     }
 
     private AutoCombatAI Selected => selectedIndex < squad.Count ? squad[selectedIndex] : null;
@@ -194,28 +239,38 @@ public class BattleDirector : MonoBehaviour
     {
         if (Selected == null || Selected.Unit.IsDead) return;
         if (Selected.characterSkillKind == AutoCombatAI.CharacterSkillKind.PowerUp)
-            Selected.TryCharacterSkill(null);
-        else targetMode = TargetMode.Skill;
+        {
+            if (Selected.TryCharacterSkill(null) && targetingFeedback != null)
+                targetingFeedback.PlayFeedback(Selected.transform.position, new Color(1f, 0.72f, 0.12f));
+        }
+        else BeginTargeting(TargetMode.Skill);
     }
 
     private void UseHeal()
     {
         if (Selected == null || Selected.Unit.IsDead || !TrySpendUniversal(healCost)) return;
         Selected.Unit.Heal(35f);
+        if (targetingFeedback != null)
+            targetingFeedback.PlayFeedback(Selected.transform.position, new Color(0.2f, 1f, 0.55f));
     }
 
     private void HandleWorldClick()
     {
-        if (Selected == null || Selected.Unit.IsDead) { targetMode = TargetMode.None; return; }
+        if (Selected == null || Selected.Unit.IsDead) { ExitTargeting(); return; }
         Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
         if (!Physics.Raycast(ray, out RaycastHit hit, 200f)) return;
-        if (targetMode == TargetMode.Move) Selected.TryMovementSkill(hit.point);
+        bool used = false;
+        Vector3 feedbackPosition = hit.point;
+        if (targetMode == TargetMode.Move) used = Selected.TryMovementSkill(hit.point);
         else if (targetMode == TargetMode.Skill)
         {
             var target = hit.collider.GetComponentInParent<CombatUnit>();
-            Selected.TryCharacterSkill(target);
+            used = Selected.TryCharacterSkill(target);
+            if (target != null) feedbackPosition = target.transform.position;
         }
-        else if (targetMode == TargetMode.Cover && TrySpendUniversal(coverCost))
+        else if (targetMode == TargetMode.Cover &&
+            FlatDistance(Selected.transform.position, hit.point) <= 9f &&
+            TrySpendUniversal(coverCost))
         {
             var block = GameObject.CreatePrimitive(PrimitiveType.Cube);
             block.name = "Placed Cover";
@@ -224,8 +279,45 @@ public class BattleDirector : MonoBehaviour
             block.layer = 8;
             var obstacle = block.AddComponent<NavMeshObstacle>();
             obstacle.carving = true;
+            used = true;
         }
+        if (!used) return;
+        if (targetingFeedback != null)
+            targetingFeedback.PlayFeedback(feedbackPosition,
+                targetMode == TargetMode.Cover ? new Color(0.25f, 0.75f, 1f) : new Color(1f, 0.65f, 0.1f));
+        ExitTargeting();
+    }
+
+    private void BeginTargeting(TargetMode mode)
+    {
+        if (Selected == null || Selected.Unit.IsDead) return;
+        if (mode == TargetMode.Move && Selected.MovementCooldownRemaining > 0f) return;
+        if (mode == TargetMode.Skill && Selected.CharacterCooldownRemaining > 0f) return;
+        targetMode = mode;
+        Time.timeScale = 0.12f;
+        if (targetingFeedback == null) return;
+        if (mode == TargetMode.Move) targetingFeedback.ShowArrow(Selected.transform, Selected.movementRange);
+        else targetingFeedback.ShowRange(Selected.transform, mode == TargetMode.Skill ? Selected.skillRange : 9f);
+    }
+
+    private void UpdateTargetPointer()
+    {
+        if (targetMode == TargetMode.None || targetingFeedback == null || Camera.main == null) return;
+        Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
+        if (Physics.Raycast(ray, out RaycastHit hit, 200f)) targetingFeedback.SetPointer(hit.point);
+    }
+
+    private void ExitTargeting()
+    {
         targetMode = TargetMode.None;
+        if (targetingFeedback != null) targetingFeedback.Hide();
+        Time.timeScale = paused ? 0f : speedLevel;
+    }
+
+    private static float FlatDistance(Vector3 a, Vector3 b)
+    {
+        a.y = b.y = 0f;
+        return Vector3.Distance(a, b);
     }
 
     public bool TrySpendUniversal(float amount)
@@ -240,12 +332,20 @@ public class BattleDirector : MonoBehaviour
     private void RefreshBattle()
     {
         int enemies = CountAlive(CombatUnit.CombatTeam.Enemy);
-        statusText.text = "ASSAULT  •  Wave " + wave + "  •  Enemies " + CountAlive(CombatUnit.CombatTeam.Enemy) +
-            "  •  Universal " + Mathf.FloorToInt(universalPoints) + "/" + universalCapacity;
+        string section = phase == StagePhase.MovingToWaveTwo ? "ADVANCING TO SECTION 2" :
+            phase == StagePhase.MovingToBoss ? "ADVANCING TO BOSS" :
+            phase == StagePhase.Boss ? "BOSS SECTION" : "WAVE " + wave;
+        statusText.text = "ASSAULT  •  " + section + "  •  Enemies " + enemies +
+            "  •  Mana " + Mathf.FloorToInt(universalPoints) + "/" + universalCapacity;
         if (timerText != null) timerText.text = Mathf.FloorToInt(elapsed / 60f).ToString("00") + ":" +
             Mathf.FloorToInt(elapsed % 60f).ToString("00");
         if (enemyText != null) enemyText.text = enemies.ToString();
         if (energyText != null) energyText.text = Mathf.FloorToInt(universalPoints).ToString();
+        if (manaSlider != null)
+        {
+            manaSlider.maxValue = universalCapacity;
+            manaSlider.value = universalPoints;
+        }
         if (energySegments != null)
         {
             float filled = universalPoints / Mathf.Max(1f, universalCapacity) * energySegments.Length;
@@ -261,14 +361,35 @@ public class BattleDirector : MonoBehaviour
                 "  Move " + Mathf.FloorToInt(unit.MovementPoints) + "/" + unit.skillPointCapacity +
                 "  •  " + Selected.CurrentState +
                 (targetMode == TargetMode.None ? "" : "  •  Click a " + (targetMode == TargetMode.Move || targetMode == TargetMode.Cover ? "position" : "target"));
+            RefreshCooldown(moveCooldownOverlay, moveCooldownText, moveButton,
+                Selected.MovementCooldownRemaining, unit.MovementPoints >= Selected.movementCost);
+            RefreshCooldown(skillCooldownOverlay, skillCooldownText, skillButton,
+                Selected.CharacterCooldownRemaining, universalPoints >= Selected.characterSkillCost);
+        }
+        bool showBoss = boss != null && !boss.IsDead && phase == StagePhase.Boss;
+        if (bossHealthPanel != null) bossHealthPanel.SetActive(showBoss);
+        if (showBoss && bossHealthSlider != null)
+        {
+            bossHealthSlider.maxValue = boss.maxHealth;
+            bossHealthSlider.value = boss.CurrentHealth;
+            if (bossNameText != null) bossNameText.text = boss.name;
         }
         for (int i = 0; i < squadButtons.Length && i < squad.Count; i++)
             squadButtons[i].GetComponentInChildren<Text>().text =
                 (i == selectedIndex ? "▶ " : "") + squad[i].name;
     }
 
+    private static void RefreshCooldown(Image overlay, Text timer, Button button, float remaining, bool affordable)
+    {
+        bool cooling = remaining > 0.01f;
+        if (overlay != null) overlay.gameObject.SetActive(cooling);
+        if (timer != null) timer.text = cooling ? Mathf.CeilToInt(remaining).ToString() : "";
+        if (button != null) button.interactable = !cooling && affordable;
+    }
+
     private void TogglePause()
     {
+        if (targetMode != TargetMode.None) ExitTargeting();
         paused = !paused;
         Time.timeScale = paused ? 0f : speedLevel;
         if (pauseButton != null) pauseButton.GetComponent<Image>().color =
@@ -303,6 +424,7 @@ public class BattleDirector : MonoBehaviour
         if (finished) return;
         finished = true;
         isPlaying = false;
+        ExitTargeting();
         Time.timeScale = 1f;
         resultText.text = won ? "VICTORY\nThe assault is complete." : "DEFEAT\nYour squad has fallen.";
         battlePanel.SetActive(false);

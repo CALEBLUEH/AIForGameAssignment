@@ -7,6 +7,7 @@ public class CombatUnit : MonoBehaviour
     public enum Stat { Attack, Defense, Range, AttackSpeed }
     private struct Modifier { public Stat stat; public float flat, multiplier, expires; }
     public CombatTeam team;
+    public bool isBoss;
     [Header("Basic stats")]
     public float maxHealth = 100f, attackPower = 20f, defense = 5f, attackRange = 5f, attackSpeed = 1f;
     public float resistance = 5f, skillPointRegeneration = 7f, skillPointCapacity = 100f;
@@ -14,10 +15,12 @@ public class CombatUnit : MonoBehaviour
     [SerializeField] private float currentHealth, movementPoints;
     [SerializeField] private bool isDead;
     private int hitsTaken;
+    private float coverProtection;
     private readonly List<Modifier> modifiers = new List<Modifier>();
     public float CurrentHealth => currentHealth;
     public float MovementPoints => movementPoints;
     public bool IsDead => isDead;
+    public bool IsBoss => isBoss;
     public float AttackPower => Modified(Stat.Attack, attackPower);
     public float Defense => Modified(Stat.Defense, defense);
     public float AttackRange => Modified(Stat.Range, attackRange);
@@ -56,7 +59,8 @@ public class CombatUnit : MonoBehaviour
     public void TakeDamage(float attack, Vector3 source)
     {
         if (isDead) return;
-        currentHealth -= Mathf.Max(1f, attack - Defense);
+        float damage = Mathf.Max(1f, attack - Defense);
+        currentHealth -= damage * (1f - Mathf.Clamp01(coverProtection));
         if (currentHealth <= 0f) { currentHealth = 0f; isDead = true; Destroy(gameObject, 0.5f); }
         else if (++hitsTaken >= Mathf.Max(1, Mathf.RoundToInt(resistance)))
         {
@@ -74,5 +78,23 @@ public class CombatUnit : MonoBehaviour
     public void Heal(float amount)
     {
         if (!isDead) currentHealth = Mathf.Min(maxHealth, currentHealth + Mathf.Max(0f, amount));
+    }
+
+    public void SetCoverProtection(float protection)
+    {
+        coverProtection = Mathf.Clamp01(protection);
+    }
+
+    public void ConfigureSpawn(float health, float power, float armor, bool boss)
+    {
+        maxHealth = health;
+        attackPower = power;
+        defense = armor;
+        isBoss = boss;
+        currentHealth = maxHealth;
+        movementPoints = skillPointCapacity;
+        isDead = false;
+        coverProtection = 0f;
+        hitsTaken = 0;
     }
 }
