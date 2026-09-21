@@ -156,6 +156,10 @@ public static class BuildPlayableScene
         {
             if (!NavMesh.SamplePosition(unit.transform.position, out _, 2f, NavMesh.AllAreas))
                 throw new System.Exception(unit.name + " is not on the baked NavMesh.");
+            var worldHUD = unit.GetComponentInChildren<WorldUnitHUD>(true);
+            if (worldHUD == null || worldHUD.healthSlider == null || worldHUD.damageLabels == null ||
+                worldHUD.damageLabels.Length < 4)
+                throw new System.Exception(unit.name + " is missing its world health and damage UI.");
             if (unit.team == CombatUnit.CombatTeam.Player) players++; else enemies++;
         }
         if (players != 4 || enemies != 3) throw new System.Exception("Unexpected initial unit count.");
@@ -168,7 +172,22 @@ public static class BuildPlayableScene
             throw new System.Exception("The three road sections are not connected.");
         if (NavMesh.SamplePosition(new Vector3(25f, 0f, 14f), out _, 1f, NavMesh.AllAreas))
             throw new System.Exception("Roadside area is unexpectedly walkable.");
-        Debug.Log("AIFG scene validation passed: LamZH HUD, 4 players, 3 enemies, NavMesh paths, no NavMeshAgent.");
+        if (!director.startImmediately || director.pausePanel == null || director.resumeButton == null ||
+            director.backButton == null || director.pausePanel.GetComponentInChildren<AudioSettingsUI>(true) == null)
+            throw new System.Exception("Gameplay preparation flow or pause audio panel is incomplete.");
+        var buildScenes = EditorBuildSettings.scenes;
+        if (buildScenes.Length < 2 || buildScenes[0].path != "Assets/Scenes/Preparation.unity" ||
+            buildScenes[1].path != "Assets/Scenes/GameplayAI.unity")
+            throw new System.Exception("Preparation must be the first build scene.");
+        EditorSceneManager.OpenScene("Assets/Scenes/Preparation.unity");
+        var preparation = Object.FindFirstObjectByType<PreparationMenuController>();
+        if (preparation == null || preparation.battleButton == null || preparation.settingsPanel == null ||
+            preparation.settingsPanel.GetComponent<AudioSettingsUI>() == null ||
+            Object.FindFirstObjectByType<PreparationCameraController>() == null ||
+            GameObject.Find("Ready Characters") == null ||
+            GameObject.Find("Ready Characters").transform.childCount != 4)
+            throw new System.Exception("Preparation scene is incomplete.");
+        Debug.Log("AIFG scene validation passed: preparation flow, Canvas audio menus, unit health bars, damage numbers, NavMesh paths and no NavMeshAgent.");
     }
 
     [MenuItem("AIFG/Apply LamZH UI Template")]
@@ -310,6 +329,17 @@ public static class BuildPlayableScene
             Sprite("Assets/UI/Auto Button.png"), new Vector2(150, 76), new Vector2(695, -380), font, "");
         director.targetingFeedback = CreateTargetingFeedback(director.transform);
 
+        director.pausePanel = Panel(canvasObject.transform, "Pause Panel", new Vector2(620, 500),
+            new Vector2(0.5f, 0.5f), navy);
+        AddAccent(director.pausePanel.transform, new Vector2(620, 8), new Vector2(0, 246), cyan);
+        Label(director.pausePanel.transform, "Pause Title", font, new Vector2(560, 55),
+            new Vector2(0, 205), 32, TextAnchor.MiddleCenter).text = "PAUSED";
+        CreateAudioSettings(director.pausePanel.transform, font, Vector2.zero, out _);
+        director.resumeButton = StyledButton(director.pausePanel.transform, "RESUME", font,
+            new Vector2(250, 58), new Vector2(-140, -205), new Color(0.10f, 0.62f, 0.82f, 1f), 20);
+        director.backButton = StyledButton(director.pausePanel.transform, "BACK TO SQUAD", font,
+            new Vector2(250, 58), new Vector2(140, -205), new Color(0.65f, 0.25f, 0.22f, 1f), 18);
+
         director.resultPanel = Panel(canvasObject.transform, "Result Panel", new Vector2(620, 320),
             new Vector2(0.5f, 0.5f), navy);
         AddAccent(director.resultPanel.transform, new Vector2(620, 8), new Vector2(0, 156), cyan);
@@ -320,6 +350,7 @@ public static class BuildPlayableScene
         director.restartButton.GetComponentInChildren<Text>().text = "RESTART";
         director.battlePanel.SetActive(false);
         director.resultPanel.SetActive(false);
+        director.pausePanel.SetActive(false);
         new GameObject("EventSystem", typeof(EventSystem), typeof(StandaloneInputModule));
         EditorSceneManager.MarkSceneDirty(scene);
         EditorSceneManager.SaveScene(scene);
@@ -411,6 +442,170 @@ public static class BuildPlayableScene
         Debug.Log("Built linear road with wave-one, wave-two and boss sections.");
     }
 
+    [MenuItem("AIFG/Build Preparation Flow and Unit HUDs")]
+    public static void BuildPresentationFlow()
+    {
+        ApplyLamZHTemplate();
+        var gameplay = EditorSceneManager.OpenScene("Assets/Scenes/GameplayAI.unity");
+        var director = Object.FindFirstObjectByType<BattleDirector>();
+        if (director == null) throw new System.Exception("BattleDirector is missing.");
+        director.startImmediately = true;
+        AttachWorldUnitHUDs();
+        EditorSceneManager.MarkSceneDirty(gameplay);
+        EditorSceneManager.SaveScene(gameplay);
+        BuildPreparationScene();
+        EditorBuildSettings.scenes = new[]
+        {
+            new EditorBuildSettingsScene("Assets/Scenes/Preparation.unity", true),
+            new EditorBuildSettingsScene("Assets/Scenes/GameplayAI.unity", true)
+        };
+        AssetDatabase.SaveAssets();
+        Debug.Log("Built preparation scene, gameplay pause audio panel, and world unit HUDs.");
+    }
+
+    private static void AttachWorldUnitHUDs()
+    {
+        Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        foreach (CombatUnit unit in Object.FindObjectsByType<CombatUnit>(FindObjectsSortMode.None))
+        {
+            Transform old = unit.transform.Find("World Unit HUD");
+            if (old != null) Object.DestroyImmediate(old.gameObject);
+            var root = new GameObject("World Unit HUD", typeof(RectTransform), typeof(Canvas),
+                typeof(CanvasScaler), typeof(WorldUnitHUD));
+            root.transform.SetParent(unit.transform, false);
+            root.transform.localPosition = new Vector3(0f, 2.65f, 0f);
+            root.transform.localScale = Vector3.one * 0.01f;
+            var rect = root.GetComponent<RectTransform>();
+            rect.sizeDelta = new Vector2(220f, 92f);
+            var canvas = root.GetComponent<Canvas>();
+            canvas.renderMode = RenderMode.WorldSpace;
+            canvas.sortingOrder = 20;
+            var scaler = root.GetComponent<CanvasScaler>();
+            scaler.dynamicPixelsPerUnit = 15f;
+            var hud = root.GetComponent<WorldUnitHUD>();
+            hud.unit = unit;
+            hud.unitName = Label(root.transform, "Unit Name", font, new Vector2(210, 30),
+                new Vector2(0, 28), 22, TextAnchor.MiddleCenter);
+            hud.unitName.fontStyle = FontStyle.Bold;
+            hud.healthSlider = CreateSlider(root.transform, "Health", new Vector2(190, 18),
+                new Vector2(0, 2), unit.team == CombatUnit.CombatTeam.Player
+                    ? new Color(0.12f, 0.78f, 1f, 1f) : new Color(1f, 0.22f, 0.18f, 1f));
+            hud.healthFill = hud.healthSlider.fillRect.GetComponent<Image>();
+            hud.damageLabels = new Text[5];
+            for (int i = 0; i < hud.damageLabels.Length; i++)
+            {
+                Text damage = Label(root.transform, "Damage Number " + (i + 1), font,
+                    new Vector2(180, 46), new Vector2((i - 2) * 8f, 8f), 30, TextAnchor.MiddleCenter);
+                damage.fontStyle = FontStyle.Bold;
+                damage.raycastTarget = false;
+                damage.gameObject.SetActive(false);
+                hud.damageLabels[i] = damage;
+            }
+        }
+    }
+
+    private static void BuildPreparationScene()
+    {
+        var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+        RenderSettings.ambientLight = new Color(0.42f, 0.48f, 0.58f, 1f);
+        Material floorMaterial = GetOrCreateMaterial("Assets/Materials/PreparationFloor.mat",
+            new Color(0.045f, 0.09f, 0.15f));
+        Material podiumMaterial = GetOrCreateMaterial("Assets/Materials/PreparationPodium.mat",
+            new Color(0.08f, 0.58f, 0.78f));
+        Material[] characterMaterials =
+        {
+            GetOrCreateMaterial("Assets/Materials/PreparationAegis.mat", new Color(0.15f, 0.65f, 0.95f)),
+            GetOrCreateMaterial("Assets/Materials/PreparationRanger.mat", new Color(0.24f, 0.82f, 0.62f)),
+            GetOrCreateMaterial("Assets/Materials/PreparationMedic.mat", new Color(0.92f, 0.42f, 0.62f)),
+            GetOrCreateMaterial("Assets/Materials/PreparationVanguard.mat", new Color(0.95f, 0.66f, 0.18f))
+        };
+        CreateBlock(null, "Preparation Floor", new Vector3(0f, -0.3f, 1f),
+            new Vector3(28f, 0.6f, 18f), floorMaterial, 0);
+        CreateBlock(null, "Backdrop", new Vector3(0f, 5f, 6f),
+            new Vector3(28f, 10f, 0.6f), floorMaterial, 0);
+        var readyRoot = new GameObject("Ready Characters");
+        string[] names = { "Aegis", "Ranger", "Medic", "Vanguard" };
+        for (int i = 0; i < names.Length; i++)
+        {
+            var character = new GameObject(names[i] + " Ready Display");
+            character.transform.SetParent(readyRoot.transform);
+            character.transform.position = new Vector3(-4.8f + i * 3.2f, 0f, 0f);
+            GameObject podium = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            podium.name = "Podium";
+            podium.transform.SetParent(character.transform, false);
+            podium.transform.localPosition = new Vector3(0f, 0.18f, 0f);
+            podium.transform.localScale = new Vector3(1.25f, 0.18f, 1.25f);
+            podium.GetComponent<MeshRenderer>().sharedMaterial = podiumMaterial;
+            GameObject body = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+            body.name = "Character Body";
+            body.transform.SetParent(character.transform, false);
+            body.transform.localPosition = new Vector3(0f, 1.55f, 0f);
+            body.transform.localScale = new Vector3(0.82f, 1.22f, 0.82f);
+            body.GetComponent<MeshRenderer>().sharedMaterial = characterMaterials[i];
+            GameObject visor = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            visor.name = "Tactical Visor";
+            visor.transform.SetParent(character.transform, false);
+            visor.transform.localPosition = new Vector3(0f, 2.28f, -0.62f);
+            visor.transform.localScale = new Vector3(0.72f, 0.18f, 0.12f);
+            visor.GetComponent<MeshRenderer>().sharedMaterial = podiumMaterial;
+        }
+        var cameraObject = new GameObject("Main Camera", typeof(Camera), typeof(AudioListener),
+            typeof(PreparationCameraController));
+        cameraObject.tag = "MainCamera";
+        Camera camera = cameraObject.GetComponent<Camera>();
+        camera.clearFlags = CameraClearFlags.SolidColor;
+        camera.backgroundColor = new Color(0.025f, 0.055f, 0.10f, 1f);
+        camera.fieldOfView = 48f;
+        var lightObject = new GameObject("Directional Light", typeof(Light));
+        Light light = lightObject.GetComponent<Light>();
+        light.type = LightType.Directional;
+        light.intensity = 1.35f;
+        lightObject.transform.rotation = Quaternion.Euler(42f, -28f, 0f);
+
+        Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        Color navy = new Color(0.035f, 0.095f, 0.17f, 0.94f);
+        Color cyan = new Color(0.10f, 0.72f, 0.92f, 1f);
+        var canvasObject = new GameObject("Preparation Canvas", typeof(RectTransform), typeof(Canvas),
+            typeof(CanvasScaler), typeof(GraphicRaycaster));
+        Canvas canvas = canvasObject.GetComponent<Canvas>();
+        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        CanvasScaler canvasScaler = canvasObject.GetComponent<CanvasScaler>();
+        canvasScaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        canvasScaler.referenceResolution = new Vector2(1600, 900);
+        canvasScaler.matchWidthOrHeight = 0.5f;
+        Label(canvasObject.transform, "Ready Title", font, new Vector2(900, 70),
+            new Vector2(0, 370), 42, TextAnchor.MiddleCenter).text = "SQUAD READY";
+        Label(canvasObject.transform, "Camera Help", font, new Vector2(700, 35),
+            new Vector2(0, 325), 18, TextAnchor.MiddleCenter).text =
+            "Right-drag to inspect the squad  •  Scroll to zoom";
+        for (int i = 0; i < names.Length; i++)
+        {
+            var card = Panel(canvasObject.transform, names[i] + " Ready Card", new Vector2(210, 48),
+                new Vector2(0.5f, 0.5f), navy);
+            card.GetComponent<RectTransform>().anchoredPosition = new Vector2(-360 + i * 240, -285);
+            Label(card.transform, "Name", font, new Vector2(195, 42), Vector2.zero, 18,
+                TextAnchor.MiddleCenter).text = "READY  •  " + names[i].ToUpperInvariant();
+        }
+        var controllerObject = new GameObject("Preparation Director", typeof(PreparationMenuController));
+        var controller = controllerObject.GetComponent<PreparationMenuController>();
+        controller.battleButton = StyledButton(canvasObject.transform, "BATTLE", font,
+            new Vector2(420, 72), new Vector2(0, -375), new Color(0.98f, 0.67f, 0.05f, 1f), 27);
+        controller.settingsButton = StyledButton(canvasObject.transform, "SETTINGS", font,
+            new Vector2(210, 58), Vector2.zero, new Color(0.10f, 0.36f, 0.58f, 1f), 19);
+        var settingsRect = controller.settingsButton.GetComponent<RectTransform>();
+        settingsRect.anchorMin = settingsRect.anchorMax = new Vector2(1f, 0f);
+        settingsRect.anchoredPosition = new Vector2(-125, 45);
+        controller.settingsPanel = CreateAudioSettings(canvasObject.transform, font, Vector2.zero, out _);
+        var audioRect = controller.settingsPanel.GetComponent<RectTransform>();
+        audioRect.anchorMin = audioRect.anchorMax = new Vector2(1f, 0f);
+        audioRect.anchoredPosition = new Vector2(-290, 235);
+        controller.closeSettingsButton = StyledButton(controller.settingsPanel.transform, "CLOSE", font,
+            new Vector2(230, 52), new Vector2(0, -150), new Color(0.16f, 0.46f, 0.66f, 1f), 18);
+        controller.settingsPanel.SetActive(false);
+        new GameObject("EventSystem", typeof(EventSystem), typeof(StandaloneInputModule));
+        EditorSceneManager.SaveScene(scene, "Assets/Scenes/Preparation.unity");
+    }
+
     public static void SmokeThreeSectionStage()
     {
         EditorSceneManager.OpenScene("Assets/Scenes/GameplayAI.unity");
@@ -435,9 +630,23 @@ public static class BuildPlayableScene
             double waited = EditorApplication.timeSinceStartup - smokeWaitStarted;
             if (smokeStep == 0 && waited > 0.5)
             {
-                director.startButton.onClick.Invoke();
+                if (!director.IsPlaying) director.startButton.onClick.Invoke();
                 if (!director.IsPlaying || !director.battlePanel.activeSelf)
                     throw new System.Exception("Battle did not start from the Canvas button.");
+                CombatUnit aegisUnit = GameObject.Find("Aegis").GetComponent<CombatUnit>();
+                CombatUnit enemyUnit = null;
+                foreach (CombatUnit candidate in Object.FindObjectsByType<CombatUnit>(FindObjectsSortMode.None))
+                    if (candidate.team == CombatUnit.CombatTeam.Enemy) { enemyUnit = candidate; break; }
+                aegisUnit.TakeDamage(30f);
+                enemyUnit.TakeDamage(30f);
+                if (!HasVisibleDamageNumber(aegisUnit) || !HasVisibleDamageNumber(enemyUnit))
+                    throw new System.Exception("Player or enemy floating damage number did not activate.");
+                director.pauseButton.onClick.Invoke();
+                if (!director.pausePanel.activeSelf || Time.timeScale != 0f)
+                    throw new System.Exception("Gameplay pause panel did not pause the battle.");
+                director.resumeButton.onClick.Invoke();
+                if (director.pausePanel.activeSelf || Time.timeScale <= 0f)
+                    throw new System.Exception("Gameplay pause panel did not resume the battle.");
                 director.skillButton.onClick.Invoke();
                 AutoCombatAI aegis = GameObject.Find("Aegis").GetComponent<AutoCombatAI>();
                 if (!director.ResolveTargetAt(aegis.transform.position))
@@ -477,6 +686,15 @@ public static class BuildPlayableScene
             EditorApplication.update -= SmokeStageTick;
             EditorApplication.Exit(1);
         }
+    }
+
+    private static bool HasVisibleDamageNumber(CombatUnit unit)
+    {
+        WorldUnitHUD hud = unit.GetComponentInChildren<WorldUnitHUD>(true);
+        if (hud == null || hud.damageLabels == null) return false;
+        foreach (Text label in hud.damageLabels)
+            if (label != null && label.gameObject.activeSelf) return true;
+        return false;
     }
 
     private static void DestroyAllEnemies()
@@ -630,6 +848,31 @@ public static class BuildPlayableScene
         slider.direction = Slider.Direction.LeftToRight;
         slider.interactable = false;
         return slider;
+    }
+
+    private static GameObject CreateAudioSettings(Transform parent, Font font, Vector2 position,
+        out AudioSettingsUI audioSettings)
+    {
+        var panel = Panel(parent, "Audio Settings Panel", new Vector2(540, 350),
+            new Vector2(0.5f, 0.5f), new Color(0.045f, 0.12f, 0.21f, 0.98f));
+        panel.GetComponent<RectTransform>().anchoredPosition = position;
+        AddAccent(panel.transform, new Vector2(540, 7), new Vector2(0, 171),
+            new Color(0.10f, 0.72f, 0.92f, 1f));
+        Label(panel.transform, "Audio Title", font, new Vector2(480, 50), new Vector2(0, 125),
+            27, TextAnchor.MiddleCenter).text = "AUDIO SETTINGS";
+        Text volumeText = Label(panel.transform, "Volume Value", font, new Vector2(450, 34),
+            new Vector2(0, 78), 18, TextAnchor.MiddleCenter);
+        Slider slider = CreateSlider(panel.transform, "Master Volume", new Vector2(430, 28),
+            new Vector2(0, 35), new Color(0.10f, 0.78f, 0.96f, 1f));
+        slider.interactable = true;
+        Button mute = StyledButton(panel.transform, "MUTE", font, new Vector2(230, 54),
+            new Vector2(0, -48), new Color(0.18f, 0.42f, 0.62f, 1f), 19);
+        audioSettings = panel.AddComponent<AudioSettingsUI>();
+        audioSettings.volumeSlider = slider;
+        audioSettings.volumeText = volumeText;
+        audioSettings.muteButton = mute;
+        audioSettings.muteText = mute.GetComponentInChildren<Text>();
+        return panel;
     }
 
     private static void AddCooldownOverlay(Transform parent, Font font, out Image overlay, out Text timer)

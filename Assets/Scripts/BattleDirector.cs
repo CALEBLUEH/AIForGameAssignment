@@ -8,7 +8,7 @@ public class BattleDirector : MonoBehaviour
 {
     public static BattleDirector Instance { get; private set; }
     [Header("Canvas references")]
-    public GameObject setupPanel, battlePanel, resultPanel;
+    public GameObject setupPanel, battlePanel, resultPanel, pausePanel;
     public Text setupText, statusText, squadText, resultText, timerText, enemyText, energyText;
     public Image[] energySegments;
     public Slider manaSlider, bossHealthSlider;
@@ -18,12 +18,14 @@ public class BattleDirector : MonoBehaviour
     public SkillTargetingFeedback targetingFeedback;
     public Button[] setupButtons, squadButtons;
     public Button leaderButton, startButton, moveButton, skillButton, healButton, coverButton, restartButton;
-    public Button pauseButton, speedButton, autoButton;
+    public Button pauseButton, speedButton, autoButton, resumeButton, backButton;
     [Header("Stage")]
     public float universalCapacity = 100f, universalRegeneration = 8f;
     public float healCost = 25f, coverCost = 35f;
     public int waveTwoCount = 4;
     public float timedEnemyDelay = 18f;
+    public bool startImmediately;
+    public string preparationSceneName = "Preparation";
     [SerializeField] private float universalPoints;
     [SerializeField] private bool isPlaying;
     private readonly List<AutoCombatAI> squad = new List<AutoCombatAI>();
@@ -50,6 +52,7 @@ public class BattleDirector : MonoBehaviour
     {
         Instance = this;
         Time.timeScale = 1f;
+        AudioSettingsUI.ApplySavedVolume();
         universalPoints = universalCapacity;
         foreach (var ai in FindObjectsByType<AutoCombatAI>(FindObjectsSortMode.None))
         {
@@ -70,7 +73,13 @@ public class BattleDirector : MonoBehaviour
         setupPanel.SetActive(true);
         battlePanel.SetActive(false);
         resultPanel.SetActive(false);
+        if (pausePanel != null) pausePanel.SetActive(false);
         RefreshSetup();
+    }
+
+    private void Start()
+    {
+        if (startImmediately) StartBattle();
     }
 
     private void BindButtons()
@@ -88,6 +97,8 @@ public class BattleDirector : MonoBehaviour
         healButton.onClick.AddListener(UseHeal);
         coverButton.onClick.AddListener(UseCover);
         if (pauseButton != null) pauseButton.onClick.AddListener(TogglePause);
+        if (resumeButton != null) resumeButton.onClick.AddListener(TogglePause);
+        if (backButton != null) backButton.onClick.AddListener(ReturnToPreparation);
         if (speedButton != null) speedButton.onClick.AddListener(CycleSpeed);
         if (autoButton != null) autoButton.onClick.AddListener(ToggleAuto);
         restartButton.onClick.AddListener(() => UnityEngine.SceneManagement.SceneManager.LoadScene(
@@ -444,9 +455,16 @@ public class BattleDirector : MonoBehaviour
         if (targetMode != TargetMode.None) ExitTargeting();
         paused = !paused;
         Time.timeScale = paused ? 0f : speedLevel;
+        if (pausePanel != null) pausePanel.SetActive(paused);
         if (pauseButton != null) pauseButton.GetComponent<Image>().color =
             paused ? new Color(0.55f, 0.72f, 0.82f, 1f) : Color.white;
         SetButtonCaption(pauseButton, paused ? "▶" : "");
+    }
+
+    private void ReturnToPreparation()
+    {
+        Time.timeScale = 1f;
+        UnityEngine.SceneManagement.SceneManager.LoadScene(preparationSceneName);
     }
 
     private void CycleSpeed()

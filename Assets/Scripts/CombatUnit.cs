@@ -16,6 +16,7 @@ public class CombatUnit : MonoBehaviour
     [SerializeField] private bool isDead;
     private int hitsTaken;
     private float coverProtection;
+    private WorldUnitHUD worldHUD;
     private readonly List<Modifier> modifiers = new List<Modifier>();
     public float CurrentHealth => currentHealth;
     public float MovementPoints => movementPoints;
@@ -25,7 +26,13 @@ public class CombatUnit : MonoBehaviour
     public float Defense => Modified(Stat.Defense, defense);
     public float AttackRange => Modified(Stat.Range, attackRange);
     public float AttackSpeed => Modified(Stat.AttackSpeed, attackSpeed);
-    private void Awake() { currentHealth = maxHealth; movementPoints = skillPointCapacity; }
+    private void Awake()
+    {
+        currentHealth = maxHealth;
+        movementPoints = skillPointCapacity;
+        worldHUD = GetComponentInChildren<WorldUnitHUD>(true);
+        if (worldHUD != null) worldHUD.Bind(this);
+    }
     private void Update()
     {
         if (isDead || (BattleDirector.Instance != null && !BattleDirector.Instance.IsPlaying)) return;
@@ -60,8 +67,10 @@ public class CombatUnit : MonoBehaviour
     {
         if (isDead) return;
         float damage = Mathf.Max(1f, attack - Defense);
-        currentHealth -= damage * (1f - Mathf.Clamp01(coverProtection));
-        if (currentHealth <= 0f) { currentHealth = 0f; isDead = true; Destroy(gameObject, 0.5f); }
+        float appliedDamage = damage * (1f - Mathf.Clamp01(coverProtection));
+        currentHealth -= appliedDamage;
+        if (worldHUD != null) worldHUD.ShowDamage(appliedDamage);
+        if (currentHealth <= 0f) { currentHealth = 0f; isDead = true; Destroy(gameObject, 1.1f); }
         else if (++hitsTaken >= Mathf.Max(1, Mathf.RoundToInt(resistance)))
         {
             hitsTaken = 0;
@@ -77,7 +86,10 @@ public class CombatUnit : MonoBehaviour
     }
     public void Heal(float amount)
     {
-        if (!isDead) currentHealth = Mathf.Min(maxHealth, currentHealth + Mathf.Max(0f, amount));
+        if (isDead) return;
+        float oldHealth = currentHealth;
+        currentHealth = Mathf.Min(maxHealth, currentHealth + Mathf.Max(0f, amount));
+        if (worldHUD != null && currentHealth > oldHealth) worldHUD.ShowHeal(currentHealth - oldHealth);
     }
 
     public void SetCoverProtection(float protection)
