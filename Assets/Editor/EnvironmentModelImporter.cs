@@ -113,7 +113,7 @@ public static class EnvironmentModelImporter
             GltfRoot gltf = JsonUtility.FromJson<GltfRoot>(File.ReadAllText(ToAbsolutePath(gltfPath)));
             if (gltf == null) throw new InvalidDataException("Could not parse " + gltfPath);
 
-            ImportContext context = new ImportContext(gltf, gltfPath, assetFolder);
+            ImportContext context = new ImportContext(gltf, gltfPath, assetFolder, true);
             GameObject fullModel = context.BuildScene(spec.prefabName);
             fullModel.transform.localScale = Vector3.one * spec.sourceScale;
             ConfigureEnvironment(fullModel, spec);
@@ -156,7 +156,7 @@ public static class EnvironmentModelImporter
     }
 
     public static GameObject ImportStandaloneModel(string assetFolder, string prefabName,
-        string prefabPath, float targetLargestDimension)
+        string prefabPath, float targetLargestDimension, bool flipTextureV = true)
     {
         string gltfPath = assetFolder.TrimEnd('/') + "/scene.gltf";
         if (!File.Exists(ToAbsolutePath(gltfPath)))
@@ -164,7 +164,7 @@ public static class EnvironmentModelImporter
 
         GltfRoot gltf = JsonUtility.FromJson<GltfRoot>(File.ReadAllText(ToAbsolutePath(gltfPath)));
         if (gltf == null) throw new InvalidDataException("Could not parse " + gltfPath);
-        var context = new ImportContext(gltf, gltfPath, assetFolder.TrimEnd('/'));
+        var context = new ImportContext(gltf, gltfPath, assetFolder.TrimEnd('/'), flipTextureV);
         GameObject model = context.BuildScene(prefabName + " Model");
         Renderer[] renderers = model.GetComponentsInChildren<Renderer>(true);
         if (renderers.Length == 0)
@@ -339,14 +339,16 @@ public static class EnvironmentModelImporter
         private readonly string assetFolder;
         private readonly byte[][] buffers;
         private readonly Material[] materials;
+        private readonly bool flipTextureV;
         private readonly Dictionary<long, Mesh> meshes = new Dictionary<long, Mesh>();
         public readonly List<string> Notes = new List<string>();
 
-        public ImportContext(GltfRoot root, string sourcePath, string folder)
+        public ImportContext(GltfRoot root, string sourcePath, string folder, bool flipV)
         {
             gltf = root;
             gltfAssetPath = sourcePath;
             assetFolder = folder;
+            flipTextureV = flipV;
             buffers = LoadBuffers();
             materials = BuildMaterials();
         }
@@ -458,7 +460,12 @@ public static class EnvironmentModelImporter
             {
                 GltfMaterial source = gltf.materials[i];
                 GltfSpecGloss specGloss = source.extensions?.KHR_materials_pbrSpecularGlossiness;
-                Material material = new Material(Shader.Find(specGloss == null ? "Standard" : "Standard (Specular setup)"))
+                bool unlit = source.extensions?.KHR_materials_unlit != null;
+                string shaderName = unlit ? "AIFG/glTF Unlit" :
+                    specGloss == null ? "Standard" : "Standard (Specular setup)";
+                Shader shader = Shader.Find(shaderName);
+                if (shader == null) throw new InvalidOperationException("Missing shader: " + shaderName);
+                Material material = new Material(shader)
                 {
                     name = string.IsNullOrWhiteSpace(source.name) ? "Material_" + i : SanitizeName(source.name)
                 };
@@ -481,7 +488,8 @@ public static class EnvironmentModelImporter
                     material.SetFloat("_Glossiness", specGloss.glossinessFactor);
                 }
                 AssignTexture(material, "_BumpMap", source.normalTexture);
-                if (material.GetTexture("_BumpMap") != null) material.EnableKeyword("_NORMALMAP");
+                if (material.HasProperty("_BumpMap") && material.GetTexture("_BumpMap") != null)
+                    material.EnableKeyword("_NORMALMAP");
                 if (source.emissiveFactor != null && source.emissiveFactor.Length >= 3)
                 {
                     material.SetColor("_EmissionColor", new Color(source.emissiveFactor[0], source.emissiveFactor[1], source.emissiveFactor[2]));
@@ -489,7 +497,8 @@ public static class EnvironmentModelImporter
                 }
                 AssignTexture(material, "_EmissionMap", source.emissiveTexture);
                 ConfigureAlpha(material, source.alphaMode, source.alphaCutoff);
-                if (source.doubleSided && material.HasProperty("_Cull")) material.SetFloat("_Cull", (float)CullMode.Off);
+                if (material.HasProperty("_Cull"))
+                    material.SetFloat("_Cull", source.doubleSided ? (float)CullMode.Off : (float)CullMode.Back);
 
                 string path = materialFolder + "/" + i.ToString("D3") + "_" + material.name + ".mat";
                 AssetDatabase.CreateAsset(material, path);
@@ -556,7 +565,8 @@ public static class EnvironmentModelImporter
         {
             float[][] values = ReadFloatAccessor(accessorIndex, 2);
             Vector2[] result = new Vector2[values.Length];
-            for (int i = 0; i < result.Length; i++) result[i] = new Vector2(values[i][0], values[i][1]);
+            for (int i = 0; i < result.Length; i++)
+                result[i] = new Vector2(values[i][0], flipTextureV ? 1f - values[i][1] : values[i][1]);
             return result;
         }
 
@@ -747,7 +757,9 @@ public static class EnvironmentModelImporter
     [Serializable] private sealed class GltfMaterialExtensions
     {
         public GltfSpecGloss KHR_materials_pbrSpecularGlossiness;
+        public GltfUnlit KHR_materials_unlit;
     }
+    [Serializable] private sealed class GltfUnlit { }
     [Serializable] private sealed class GltfSpecGloss
     {
         public float[] diffuseFactor, specularFactor;

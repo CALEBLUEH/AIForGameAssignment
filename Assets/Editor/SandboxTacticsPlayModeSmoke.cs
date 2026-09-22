@@ -92,11 +92,18 @@ public static class SandboxTacticsPlayModeSmoke
 
         TacticalCoverObstacle[] covers = Object.FindObjectsByType<TacticalCoverObstacle>(FindObjectsSortMode.None);
         CoverPoint[] points = Object.FindObjectsByType<CoverPoint>(FindObjectsSortMode.None);
-        if (covers.Length != 2 || points.Length < 4 || covers.Any(cover => cover.GetComponent<DestructibleCover>() == null))
-            throw new InvalidOperationException("The two concrete obstacles need generated cover points and destructible cover health.");
-        CoverPoint testPoint = points.FirstOrDefault(point => point.CanBeUsedBy(yuuka.Unit) && point.CanBeUsedBy(enemies[0].Unit));
+        if (covers.Length < 2 || points.Length < 4 || covers.Any(cover => cover.GetComponent<DestructibleCover>() == null ||
+            cover.Capacity != 1 || cover.GetComponentInChildren<CoverHealthHUD>(true) == null))
+            throw new InvalidOperationException("Every gameplay obstacle needs capacity-one cover, universal health and a health HUD.");
+        TacticalCoverObstacle testObstacle = covers.FirstOrDefault(cover => cover.GetComponentsInChildren<CoverPoint>(true).Length >= 2);
+        CoverPoint[] testPoints = testObstacle == null ? Array.Empty<CoverPoint>() :
+            testObstacle.GetComponentsInChildren<CoverPoint>(true);
+        CoverPoint testPoint = testPoints.FirstOrDefault(point => point.CanBeUsedBy(yuuka.Unit) && point.CanBeUsedBy(enemies[0].Unit));
         if (testPoint == null || !testPoint.TryReserve(yuuka.Unit))
             throw new InvalidOperationException("A player could not reserve an available obstacle.");
+        CoverPoint secondPoint = testPoints.FirstOrDefault(point => point != testPoint);
+        if (secondPoint != null && secondPoint.TryReserve(enemies[0].Unit))
+            throw new InvalidOperationException("Two units reserved different points on the same capacity-one obstacle.");
         testPoint.Release(yuuka.Unit);
         if (!testPoint.TryReserve(enemies[0].Unit))
             throw new InvalidOperationException("An enemy could not reserve the same available obstacle.");
@@ -168,7 +175,7 @@ public static class SandboxTacticsPlayModeSmoke
         if (!skillUsed || director.UniversalPoints >= manaBefore)
             throw new InvalidOperationException($"The character-skill UI did not activate Yuuka's defensive skill; cooldown={yuuka.CharacterCooldownRemaining:F2}, mana={director.UniversalPoints:F1}.");
 
-        Debug.Log($"SANDBOX_TACTICS_PLAYMODE_OK Momoi moved={moved:F3}; cover works for both teams with team-shared abandonment; enemy formation slots, wider separation, and movement/character-skill UI passed.");
+        Debug.Log($"SANDBOX_TACTICS_PLAYMODE_OK Momoi moved={moved:F3}; all obstacles have capacity-one shared reservation, health/HUD and team-shared abandonment; enemy formation slots, wider separation, and movement/character-skill UI passed.");
         RestoreSelection();
         SessionState.SetInt(PhaseKey, 99);
         EditorApplication.isPlaying = false;

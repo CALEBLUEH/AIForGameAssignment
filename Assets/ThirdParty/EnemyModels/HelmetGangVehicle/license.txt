@@ -1,0 +1,11 @@
+Model Information:
+* title:	[Blue Archive Vehicle] - Helmet Gangs
+* source:	https://sketchfab.com/3d-models/blue-archive-vehicle-helmet-gangs-b79df614b4034cd6ad6e83339fa5ab37
+* author:	A-Time (https://sketchfab.com/polapatsungpetch)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "[Blue Archive Vehicle] - Helmet Gangs" (https://sketchfab.com/3d-models/blue-archive-vehicle-helmet-gangs-b79df614b4034cd6ad6e83339fa5ab37) by A-Time (https://sketchfab.com/polapatsungpetch) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

@@ -37,6 +37,8 @@ public class BattleDirector : MonoBehaviour
     [Min(0.1f)] [SerializeField] private float basicBuffDuration = 10f;
     [Min(0f)] [SerializeField] private float airstrikeDamage = 75f;
     [Min(0.25f)] [SerializeField] private float airstrikeRadius = 3.5f;
+    [Min(0.05f)] [SerializeField] private float airstrikeParticleRadius = 2.5f;
+    [Min(0.05f)] [SerializeField] private float airstrikeParticleSize = 0.9f;
     [Min(0.1f)] [SerializeField] private float basicTargetSnapRadius = 1.8f;
     [Min(1f)] [SerializeField] private float skillDropHeight = 10f;
     [Min(0.1f)] [SerializeField] private float airstrikeDropDuration = 0.65f;
@@ -54,6 +56,9 @@ public class BattleDirector : MonoBehaviour
     [Header("Enemy waves")]
     [Tooltip("When assigned, marker-based waves replace the legacy hardcoded enemy coordinates and boss sequence.")]
     [SerializeField] private EnemyWaveSpawner enemyWaveSpawner;
+    [Header("Level opening")]
+    [Tooltip("Optional reusable two-second squad introduction. Battle AI and waves remain stopped until it completes.")]
+    [SerializeField] private LevelOpeningSequence openingSequence;
     [Header("Boss configuration")]
     public string bossName = "Boss 1";
 
@@ -99,6 +104,7 @@ public class BattleDirector : MonoBehaviour
     private float elapsed;
     private bool finished;
     private bool paused;
+    private bool openingInProgress;
     private int speedLevel = 1;
     [SerializeField] private bool autoEnabled = true;
     private CombatUnit boss;
@@ -112,6 +118,7 @@ public class BattleDirector : MonoBehaviour
     public bool IsPlaying => isPlaying;
     public float UniversalPoints => universalPoints;
     public bool AutoEnabled => autoEnabled;
+    public float BattleSpeed => Mathf.Max(0.1f, speedLevel);
 
     public void SetEnemyWaveSpawner(EnemyWaveSpawner spawner) => enemyWaveSpawner = spawner;
 
@@ -142,7 +149,7 @@ public class BattleDirector : MonoBehaviour
         AudioSettingsUI.ApplySavedVolume();
         CombatUnit.UnitDied += OnUnitDied;
         universalPoints = universalCapacity;
-        foreach (var ai in FindObjectsByType<AutoCombatAI>(FindObjectsSortMode.None))
+        foreach (var ai in FindObjectsByType<AutoCombatAI>(FindObjectsInactive.Include, FindObjectsSortMode.None))
         {
             var combatUnit = ai.GetComponent<CombatUnit>();
             if (combatUnit.team == CombatUnit.CombatTeam.Player) squad.Add(ai);
@@ -259,6 +266,23 @@ public class BattleDirector : MonoBehaviour
 
     private void StartBattle()
     {
+        if (isPlaying || openingInProgress) return;
+        PrepareSquadDeployment();
+        setupPanel.SetActive(false);
+        battlePanel.SetActive(false);
+        if (openingSequence != null && openingSequence.isActiveAndEnabled)
+        {
+            openingInProgress = true;
+            List<AutoCombatAI> deployedSquad = new List<AutoCombatAI>(deployedIndices.Count);
+            foreach (int index in deployedIndices) deployedSquad.Add(squad[index]);
+            openingSequence.Play(deployedSquad, ActivateBattle);
+            return;
+        }
+        ActivateBattle();
+    }
+
+    private void PrepareSquadDeployment()
+    {
         deployedIndices.Clear();
         deployedUnitIds.Clear();
         playerDeaths = 0;
@@ -267,8 +291,10 @@ public class BattleDirector : MonoBehaviour
         for (int i = 0; i < squad.Count; i++)
         {
             if (!selected[i]) { squad[i].gameObject.SetActive(false); continue; }
+            squad[i].gameObject.SetActive(true);
             deployedIndices.Add(i);
-            deployedUnitIds.Add(squad[i].Unit.GetInstanceID());
+            CombatUnit deployedUnit = squad[i].GetComponent<CombatUnit>();
+            if (deployedUnit != null) deployedUnitIds.Add(deployedUnit.GetInstanceID());
             var member = squad[i].GetComponent<SquadMember>();
             if (i == leaderIndex)
             {
@@ -279,6 +305,11 @@ public class BattleDirector : MonoBehaviour
         selectedIndex = leaderIndex;
         phase = StagePhase.WaveOne;
         wave = 1;
+    }
+
+    private void ActivateBattle()
+    {
+        openingInProgress = false;
         isPlaying = true;
         setupPanel.SetActive(false);
         battlePanel.SetActive(true);
@@ -286,6 +317,8 @@ public class BattleDirector : MonoBehaviour
         if (enemyWaveSpawner != null) enemyWaveSpawner.BeginBattle();
         RefreshBattle();
     }
+
+    public void SetOpeningSequence(LevelOpeningSequence sequence) => openingSequence = sequence;
 
     private void OnUnitDied(CombatUnit deadUnit)
     {
@@ -813,7 +846,8 @@ public class BattleDirector : MonoBehaviour
                 airstrikeDropDuration, 1f, true, landed =>
                 {
                     SkillVfx.SpawnBurst(landingPoint + Vector3.up * 0.25f,
-                        new Color(1f, 0.42f, 0.12f), 0.75f, 55, 1.1f);
+                        new Color(1f, 0.42f, 0.12f), airstrikeParticleSize, 55, 1.1f,
+                        airstrikeParticleRadius);
                     foreach (CombatUnit enemy in FindObjectsByType<CombatUnit>(FindObjectsSortMode.None))
                         if (!enemy.IsDead && enemy.team == CombatUnit.CombatTeam.Enemy &&
                             FlatDistance(landingPoint, enemy.transform.position) <= airstrikeRadius)

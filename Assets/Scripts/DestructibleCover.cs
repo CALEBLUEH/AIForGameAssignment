@@ -1,7 +1,9 @@
+using System;
 using UnityEngine;
 
 public class DestructibleCover : MonoBehaviour
 {
+    public event Action<DestructibleCover> HealthChanged;
     [Header("Cover Health")]
     [SerializeField] private float maxHealth = 150f;
     [SerializeField] private float currentHealth;
@@ -14,6 +16,7 @@ public class DestructibleCover : MonoBehaviour
     {
         maxHealth = Mathf.Max(1f, configuredMaxHealth);
         currentHealth = maxHealth;
+        HealthChanged?.Invoke(this);
     }
 
     private void Awake()
@@ -26,9 +29,11 @@ public class DestructibleCover : MonoBehaviour
         if (IsDestroyed || amount <= 0f) return;
 
         currentHealth -= amount;
+        HealthChanged?.Invoke(this);
         if (currentHealth <= 0f)
         {
             currentHealth = 0f;
+            HealthChanged?.Invoke(this);
             BreakCover();
         }
     }

@@ -99,12 +99,14 @@ public static class SandboxCharacterSkillSetup
                 case AutoCombatAI.CombatRole.MomoiLowCostAOE:
                     ai.skillRange = 10f;
                     ai.coneAngle = 82f;
+                    ai.coneProjectilesPerTick = 5;
                     ai.damageTickCount = 6;
                     ai.damageTickDuration = 2f;
                     break;
                 case AutoCombatAI.CombatRole.HinaHighCostAOE:
                     ai.skillRange = 15f;
                     ai.coneAngle = 42f;
+                    ai.coneProjectilesPerTick = 5;
                     ai.damageTickCount = 6;
                     ai.damageTickDuration = 2f;
                     break;

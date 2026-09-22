@@ -4,13 +4,14 @@ using UnityEngine;
 public static class SkillVfx
 {
     public static float LaunchProjectile(Vector3 start, Transform homingTarget, Vector3 targetPoint,
-        float speed, float maxRange, Color color, bool whiteCore, Action onImpact = null)
+        float speed, float maxRange, Color color, bool whiteCore, Action onImpact = null,
+        float projectileSize = 0.32f)
     {
         GameObject projectile = GameObject.CreatePrimitive(PrimitiveType.Sphere);
         projectile.name = "Skill Projectile";
         UnityEngine.Object.Destroy(projectile.GetComponent<Collider>());
         projectile.transform.position = start;
-        projectile.transform.localScale = Vector3.one * 0.22f;
+        projectile.transform.localScale = Vector3.one * Mathf.Max(0.05f, projectileSize);
         Material material = CreateGlowMaterial(color);
         projectile.GetComponent<Renderer>().sharedMaterial = material;
 
@@ -56,7 +57,7 @@ public static class SkillVfx
     }
 
     public static void SpawnBurst(Vector3 position, Color color, float size = 0.45f,
-        int count = 28, float duration = 0.8f)
+        int count = 28, float duration = 0.8f, float effectRadius = 0.2f)
     {
         GameObject effect = new GameObject("Skill Impact Particles");
         effect.transform.position = position;
@@ -76,9 +77,9 @@ public static class SkillVfx
         emission.SetBursts(new[] { new ParticleSystem.Burst(0f, (short)Mathf.Clamp(count, 1, short.MaxValue)) });
         var shape = particles.shape;
         shape.shapeType = ParticleSystemShapeType.Sphere;
-        shape.radius = 0.2f;
+        shape.radius = Mathf.Max(0.01f, effectRadius);
         ParticleSystemRenderer renderer = particles.GetComponent<ParticleSystemRenderer>();
-        renderer.sharedMaterial = CreateGlowMaterial(color);
+        renderer.sharedMaterial = CreateParticleMaterial(color);
         particles.Play();
     }
 
@@ -107,7 +108,7 @@ public static class SkillVfx
         shape.shapeType = ParticleSystemShapeType.Sphere;
         shape.radius = radius;
         ParticleSystemRenderer renderer = particles.GetComponent<ParticleSystemRenderer>();
-        renderer.sharedMaterial = CreateGlowMaterial(color);
+        renderer.sharedMaterial = CreateParticleMaterial(color);
         particles.Play();
         SkillTimedDestroy destroy = effect.AddComponent<SkillTimedDestroy>();
         destroy.Configure(duration);
@@ -118,6 +119,14 @@ public static class SkillVfx
         Shader shader = Shader.Find("AIFG/Skill Glow");
         if (shader == null) shader = Shader.Find("Sprites/Default");
         Material material = new Material(shader) { name = "Runtime Skill Glow", hideFlags = HideFlags.DontSave };
+        material.color = color;
+        return material;
+    }
+
+    private static Material CreateParticleMaterial(Color color)
+    {
+        Shader shader = Shader.Find("Sprites/Default");
+        Material material = new Material(shader) { name = "Runtime Skill Particle", hideFlags = HideFlags.DontSave };
         material.color = color;
         return material;
     }

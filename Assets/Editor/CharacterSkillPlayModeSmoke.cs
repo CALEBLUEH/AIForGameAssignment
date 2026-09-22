@@ -98,6 +98,13 @@ public static class CharacterSkillPlayModeSmoke
         characterCard.Button.onClick.Invoke();
         if (!Mathf.Approximately(Time.timeScale, 1f) || overlay.gameObject.activeSelf)
             throw new InvalidOperationException("Clicking the same card did not cancel targeting without casting.");
+        if (!Mathf.Approximately(SkillCinematicPlayer.ResolvePlaybackSpeed(director, 0.2f), director.BattleSpeed))
+            throw new InvalidOperationException("Skill video speed still inherited the 20% targeting slowdown.");
+        director.speedButton.onClick.Invoke();
+        if (!Mathf.Approximately(director.BattleSpeed, 2f) ||
+            !Mathf.Approximately(SkillCinematicPlayer.ResolvePlaybackSpeed(director, 0.2f), 2f))
+            throw new InvalidOperationException("Skill video did not follow the 2x battle speed setting.");
+        director.speedButton.onClick.Invoke();
 
         mika = Role(players, AutoCombatAI.CombatRole.MikaSingleTarget);
         ayane = Role(players, AutoCombatAI.CombatRole.AyaneHealer);

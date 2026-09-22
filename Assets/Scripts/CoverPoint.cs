@@ -17,6 +17,7 @@ public class CoverPoint : MonoBehaviour
 
     public bool IsAvailable => occupant == null;
     public bool IsAbandoned => obstacle != null && obstacle.HasAnyAbandonedTeam;
+    public TacticalCoverObstacle Obstacle => obstacle;
     public CombatUnit Occupant => occupant;
     public bool IsReservedBy(CombatUnit unit) => occupant == unit;
     private CombatUnit occupant;
@@ -32,13 +33,15 @@ public class CoverPoint : MonoBehaviour
     public bool TryReserve(CombatUnit unit)
     {
         if (!CanBeUsedBy(unit)) return false;
+        if (obstacle != null && !obstacle.TryReserve(unit)) return false;
         occupant = unit;
         return true;
     }
 
     public bool CanBeUsedBy(CombatUnit unit) => unit != null &&
         (occupant == null || occupant == unit) &&
-        (obstacle == null || !obstacle.IsAbandonedFor(unit.team));
+        (obstacle == null || (!obstacle.IsAbandonedFor(unit.team) &&
+            (obstacle.IsReservedBy(unit) || obstacle.ReservedCount < obstacle.Capacity)));
 
     public void Occupy(CombatUnit unit)
     {
@@ -66,6 +69,7 @@ public class CoverPoint : MonoBehaviour
         if (unit == null || occupant != unit) return;
         unit.SetCoverProtection(0f, null);
         occupant = null;
+        if (obstacle != null) obstacle.Release(unit);
     }
 
     public void Abandon(CombatUnit unit)
@@ -81,6 +85,31 @@ public class CoverPoint : MonoBehaviour
         obstacle = owner;
         protection = Mathf.Clamp(configuredProtection, 0f, 0.95f);
         occupancyRadius = Mathf.Max(0.1f, configuredOccupancyRadius);
+    }
+
+    public bool TryGetSafeStandPosition(out Vector3 position)
+    {
+        position = transform.position;
+        if (!UnityEngine.AI.NavMesh.SamplePosition(position, out UnityEngine.AI.NavMeshHit hit,
+                Mathf.Max(0.75f, occupancyRadius * 2f), UnityEngine.AI.NavMesh.AllAreas))
+            return false;
+        position = hit.position;
+        if (coverCollider == null) return true;
+
+        Vector3 closest = coverCollider.ClosestPoint(position);
+        Vector3 flatDelta = position - closest;
+        flatDelta.y = 0f;
+        float requiredClearance = Mathf.Max(0.15f, occupancyRadius * 0.5f);
+        if (flatDelta.sqrMagnitude >= requiredClearance * requiredClearance) return true;
+
+        Vector3 away = position - coverCollider.bounds.center;
+        away.y = 0f;
+        if (away.sqrMagnitude < 0.001f) away = transform.forward;
+        Vector3 outside = closest + away.normalized * requiredClearance;
+        if (!UnityEngine.AI.NavMesh.SamplePosition(outside, out hit,
+                Mathf.Max(1f, occupancyRadius * 2f), UnityEngine.AI.NavMesh.AllAreas)) return false;
+        position = hit.position;
+        return true;
     }
 
     private void OnDrawGizmosSelected()

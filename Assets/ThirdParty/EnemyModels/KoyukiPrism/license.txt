@@ -1,0 +1,11 @@
+Model Information:
+* title:	Eternal Koyuki Prism
+* source:	https://sketchfab.com/3d-models/eternal-koyuki-prism-01dda6bb469a4a25853a8080f3dc6251
+* author:	VuckyZ (https://sketchfab.com/VuckyZ123)
+
+Model License:
+* license type:	CC-BY-SA-4.0 (http://creativecommons.org/licenses/by-sa/4.0/)
+* requirements:	Author must be credited. Modified versions must have the same license. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Eternal Koyuki Prism" (https://sketchfab.com/3d-models/eternal-koyuki-prism-01dda6bb469a4a25853a8080f3dc6251) by VuckyZ (https://sketchfab.com/VuckyZ123) licensed under CC-BY-SA-4.0 (http://creativecommons.org/licenses/by-sa/4.0/)

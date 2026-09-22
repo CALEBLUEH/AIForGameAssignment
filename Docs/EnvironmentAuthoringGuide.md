@@ -9,7 +9,7 @@ The generated prefabs encode the intended meaning through the `EnvironmentAsset`
 - **Road**: walkable, with mesh colliders for NavMesh baking.
 - **Normal blockade**: movement blocker with a `Not Walkable` modifier; also blocks combat sight through `BlockingObstacle`.
 - **See-through blockade**: movement blocker with a `Not Walkable` modifier; its `BlockingObstacle` deliberately has `blocksLineOfSight` disabled.
-- **Obstacle / Concrete Fence**: movement and sight blocker, marked as suitable for manually placed cover points.
+- **Obstacle / Concrete Fence**: every gameplay obstacle is a destructible tactical cover object. It has one shared reservation by default, cover points, team-shared used/abandoned state, universal health, and a world-space health bar.
 - **Decoration**: visual only by default, so distant buildings cannot unexpectedly alter the baked route.
 
 ## Recommended Sandbox_Gameplay setup
@@ -25,7 +25,7 @@ The generated prefabs encode the intended meaning through the `EnvironmentAsset`
 
 ## Cover and projectiles
 
-The concrete fence is only marked as cover-capable. Place `CoverPoint` objects manually where a character should stand and assign the physical fence collider; cover positions depend on your final layout.
+Every obstacle uses the same cover behavior. Place `CoverPoint` objects where a character should stand and assign the physical obstacle collider; the physical obstacle owns the shared capacity, so multiple points provide approach choices without allowing multiple occupants when capacity is one.
 
 Current attacks apply damage after the AI line-of-sight check rather than spawning physical bullets. When projectile effects are added, use the same `BlockingObstacle.blocksLineOfSight` decision: normal blockades stop the projectile, while see-through blockades are ignored by the projectile query.
 
@@ -38,3 +38,13 @@ Current attacks apply damage after the AI line-of-sight check rather than spawni
 - `Assets/Prefabs/Environment/Decoration`
 
 Building 3 is also split into ten individually placeable building prefabs. Building 4 is split into two. Building 6 stays combined because its pieces use generic names and are not clearly independent buildings.
+
+## Reusing the level opening
+
+`Sandbox_Gameplay` keeps the reusable opening setup under `SquadCoordinate`:
+
+- `Opening Camera` is the authored introduction view.
+- `Squad Spawn 1` through `Squad Spawn 4` are the chosen-character start markers.
+- `LevelOpeningSequence` holds the camera references, two-second duration, 10-degree negative-X camera motion, and NavMesh placement radius.
+
+For another level, copy the `SquadCoordinate` hierarchy into that scene, position the root once, and assign its `LevelOpeningSequence` to the level's `BattleDirector`. Keep the four markers close enough to the baked road for the configured NavMesh search radius. The selected roster is moved to these markers at runtime, remains in Idle during the introduction, and only begins AI, battle UI, timers, and enemy waves after the main camera takes over.

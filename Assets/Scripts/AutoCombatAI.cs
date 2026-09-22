@@ -36,6 +36,8 @@ public class AutoCombatAI : MonoBehaviour
     public float coverDetectionRange = 12f;
     public float coverRetryDelay = 2f;
     public float coverFiringRangeMultiplier = 1.15f;
+    [Min(1f)] public float coverMinimumStayDuration = 1f;
+    [Min(1f)] public float coverApproachTimeout = 8f;
     [Header("Character skill balance")]
     public float characterSkillCost = 40f, characterSkillCooldown = 10f, skillRange = 6f;
     public float skillPowerMultiplier = 2.5f, skillHealAmount = 35f, aoeRadius = 4f;
@@ -53,6 +55,8 @@ public class AutoCombatAI : MonoBehaviour
     [Min(0f)] public float skillWindup = 0.45f;
     [Min(0f)] public float skillRecovery = 0.35f;
     [Min(1f)] public float skillProjectileSpeed = 28f;
+    [Min(0.05f)] public float skillProjectileSize = 0.32f;
+    [Min(1)] public int coneProjectilesPerTick = 5;
     [Min(0.1f)] public float skillDropHeight = 9f;
     [Min(0.05f)] public float skillDropDuration = 0.7f;
     public GameObject medKitPrefab;
@@ -99,6 +103,8 @@ public class AutoCombatAI : MonoBehaviour
     private EnemyFormationMember formationMember;
     private CoverPoint rejectedCoverPoint;
     private float rejectedCoverUntil;
+    private float coverReservedAt, coverReachedAt;
+    private bool coverOccupied;
     private Vector3 losRepositionPoint;
     private float losRepositionValidUntil;
     private Vector3 enemySpawnPosition;
@@ -112,7 +118,11 @@ public class AutoCombatAI : MonoBehaviour
     public float MovementCooldownRemaining => Mathf.Max(0f, movementReadyAt - Time.time);
     public float CharacterCooldownRemaining => Mathf.Max(0f, characterSkillReadyAt - Time.time);
     public bool IsCastingSkill => skillCasting;
+    public CoverPoint ReservedCover => coverPoint;
+    public bool IsOccupyingCover => coverPoint != null && coverOccupied;
+    public float CoverOccupiedDuration => IsOccupyingCover ? Mathf.Max(0f, Time.time - coverReachedAt) : 0f;
     public string SkillDescription => string.IsNullOrWhiteSpace(skillDescription) ? DefaultSkillDescription() : skillDescription;
+    public event System.Action AttackPerformed;
 
     private void Awake()
     {
@@ -200,7 +210,8 @@ public class AutoCombatAI : MonoBehaviour
         { FindTarget(); nextSearch = Time.time + targetSearchInterval; }
         if (currentTarget == null)
         {
-            ReleaseCover(); ClearPath(); ApplyIdleSeparation(); currentState = "Advancing"; return;
+            if (coverPoint != null && HandleCover()) return;
+            ReleaseCover(); ClearPath(); ApplyIdleSeparation(); currentState = "Waiting"; return;
         }
         if (Time.time >= nextAutoDecision)
         {
@@ -225,6 +236,7 @@ public class AutoCombatAI : MonoBehaviour
             {
                 bool finisher = actionIndex >= basicAttacksBeforeFinisher;
                 currentTarget.TakeDamage(unit.AttackPower * (finisher ? finisherMultiplier : 1f), transform.position);
+                AttackPerformed?.Invoke();
                 actionIndex = finisher ? 0 : actionIndex + 1;
                 currentState = finisher ? "Finisher" : "Basic attack";
                 nextAttack = Time.time + 1f / Mathf.Max(0.1f, unit.AttackSpeed);
@@ -442,8 +454,6 @@ public class AutoCombatAI : MonoBehaviour
 
     private bool HandleCover()
     {
-        if (currentTarget == null) return false;
-
         float coverAttackRange = unit.AttackRange * Mathf.Max(1f, coverFiringRangeMultiplier);
 
         // Already reserved/using cover.
@@ -455,26 +465,51 @@ public class AutoCombatAI : MonoBehaviour
                 return false;
             }
 
-            if (!coverPoint.ProtectsFrom(currentTarget.transform.position))
+            if (!coverPoint.TryGetSafeStandPosition(out Vector3 standPosition))
             {
                 RejectCurrentCover();
-                currentState = "Leaving invalid cover";
+                currentState = "Leaving unreachable cover";
                 return false;
             }
 
-            if (Distance(transform.position, coverPoint.transform.position) > coverPoint.occupancyRadius)
+            if (Distance(transform.position, standPosition) > coverPoint.occupancyRadius)
             {
+                if (Time.time - coverReservedAt >= Mathf.Max(1f, coverApproachTimeout))
+                {
+                    RejectCurrentCover();
+                    currentState = "Cover approach timed out";
+                    return false;
+                }
                 currentState = "Taking cover";
-                Navigate(coverPoint.transform.position, Mathf.Max(0.1f, coverPoint.occupancyRadius * 0.45f));
+                Navigate(standPosition, Mathf.Max(0.1f, coverPoint.occupancyRadius * 0.45f));
                 Move(movementSpeed, true);
+                return true;
+            }
+
+            if (!coverOccupied)
+            {
+                coverOccupied = true;
+                coverReachedAt = Time.time;
+                coverPoint.Occupy(unit);
+                ClearPath();
+            }
+
+            bool minimumStayComplete = Time.time - coverReachedAt >= Mathf.Max(1f, coverMinimumStayDuration);
+            if (!minimumStayComplete)
+            {
+                ClearPath();
+                if (currentTarget != null) Face(currentTarget.transform.position - transform.position);
+                currentState = "Occupying cover";
                 return true;
             }
 
             // The proposal treats a reached obstacle with no valid target in range as used.
             // Abandoning the obstacle is shared by this team, preventing repeated useless visits.
-            float enemyDistanceFromCover = Distance(coverPoint.transform.position, currentTarget.transform.position);
-            if (enemyDistanceFromCover > coverAttackRange ||
-                !HasSightFromCover(coverPoint.transform.position, currentTarget, coverPoint.coverCollider))
+            float enemyDistanceFromCover = currentTarget == null ? float.PositiveInfinity :
+                Distance(standPosition, currentTarget.transform.position);
+            if (currentTarget == null || enemyDistanceFromCover > coverAttackRange ||
+                !coverPoint.ProtectsFrom(currentTarget.transform.position) ||
+                !HasSightFromCover(standPosition, currentTarget, coverPoint.coverCollider))
             {
                 CoverPoint abandoned = coverPoint;
                 coverPoint = null;
@@ -484,7 +519,6 @@ public class AutoCombatAI : MonoBehaviour
             }
 
             // COMMIT to this fighting position. Do not fall through into normal Pursuing logic.
-            coverPoint.Occupy(unit);
             ClearPath();
             ApplyIdleSeparation();
             Face(currentTarget.transform.position - transform.position);
@@ -494,6 +528,7 @@ public class AutoCombatAI : MonoBehaviour
             {
                 bool finisher = actionIndex >= basicAttacksBeforeFinisher;
                 currentTarget.TakeDamage(unit.AttackPower * (finisher ? finisherMultiplier : 1f), transform.position);
+                AttackPerformed?.Invoke();
                 actionIndex = finisher ? 0 : actionIndex + 1;
                 currentState = finisher ? "Cover finisher" : "Cover attack";
                 nextAttack = Time.time + 1f / Mathf.Max(0.1f, unit.AttackSpeed);
@@ -543,6 +578,9 @@ public class AutoCombatAI : MonoBehaviour
         if (best == null || !best.TryReserve(unit)) return false;
 
         coverPoint = best;
+        coverReservedAt = Time.time;
+        coverReachedAt = 0f;
+        coverOccupied = false;
         returning = false;
         currentState = "Cover reserved";
         return true;
@@ -552,6 +590,8 @@ public class AutoCombatAI : MonoBehaviour
     {
         if (coverPoint == null) return;
         coverPoint.Release(unit); coverPoint = null;
+        coverReservedAt = coverReachedAt = 0f;
+        coverOccupied = false;
     }
 
     private void RejectCurrentCover()
@@ -561,6 +601,8 @@ public class AutoCombatAI : MonoBehaviour
         rejectedCoverUntil = Time.time + Mathf.Max(0.1f, coverRetryDelay);
         coverPoint.Abandon(unit);
         coverPoint = null;
+        coverReservedAt = coverReachedAt = 0f;
+        coverOccupied = false;
     }
 
     private void FindTarget()
@@ -914,6 +956,8 @@ public class AutoCombatAI : MonoBehaviour
 
     private IEnumerator PerformCharacterSkill(Vector3 origin, Vector3 direction, Vector3 point, CombatUnit target)
     {
+        if (SkillCinematicPlayer.Instance != null)
+            yield return SkillCinematicPlayer.Instance.Play(role);
         Face(direction);
         currentState = "Skill windup";
         if (skillWindup > 0f) yield return new WaitForSeconds(skillWindup);
@@ -933,7 +977,7 @@ public class AutoCombatAI : MonoBehaviour
                             target.TakeDamage(unit.AttackPower * skillPowerMultiplier, transform.position);
                             target.ApplyStatus(primaryEffect);
                             SkillVfx.SpawnBurst(TargetCenter(target), new Color(1f, 0.22f, 0.72f, 1f), 0.55f, 38, 0.9f);
-                        });
+                        }, skillProjectileSize);
                     yield return new WaitForSeconds(travel);
                 }
                 break;
@@ -983,26 +1027,25 @@ public class AutoCombatAI : MonoBehaviour
         for (int tick = 0; tick < ticks; tick++)
         {
             Color projectileColor = role == CombatRole.HinaHighCostAOE
-                ? new Color(0.24f, 0.04f, 0.42f, 1f)
+                ? new Color(0.58f, 0.08f, 0.96f, 1f)
                 : new Color(1f, 0.48f, 0.34f, 1f);
             bool whiteCore = role == CombatRole.HinaHighCostAOE;
-            bool fired = false;
             foreach (CombatUnit enemy in FindObjectsByType<CombatUnit>(FindObjectsSortMode.None))
             {
                 if (enemy.IsDead || enemy.team == unit.team || !IsInsideCone(origin, direction, enemy.transform.position)) continue;
-                SkillVfx.LaunchProjectile(MuzzlePosition(), enemy.transform, TargetCenter(enemy),
-                    skillProjectileSpeed, skillRange, projectileColor, whiteCore);
                 enemy.TakeDamage(damagePerTick, transform.position);
                 if (tick == 0) enemy.ApplyStatus(primaryEffect);
-                fired = true;
             }
-            if (!fired)
+
+            int projectileCount = Mathf.Max(1, coneProjectilesPerTick);
+            for (int projectileIndex = 0; projectileIndex < projectileCount; projectileIndex++)
             {
-                float spread = Mathf.Lerp(-coneAngle * 0.35f, coneAngle * 0.35f,
-                    ticks <= 1 ? 0.5f : tick / (float)(ticks - 1));
+                // Pick a fresh direction for every visual bullet and every damage tick.
+                // Damage still uses the full cone test above, so this changes presentation only.
+                float spread = Random.Range(-coneAngle * 0.48f, coneAngle * 0.48f);
                 Vector3 visualDirection = Quaternion.Euler(0f, spread, 0f) * direction;
                 SkillVfx.LaunchProjectile(MuzzlePosition(), null, origin + visualDirection * skillRange,
-                    skillProjectileSpeed, skillRange, projectileColor, whiteCore);
+                    skillProjectileSpeed, skillRange, projectileColor, whiteCore, null, skillProjectileSize);
             }
             if (tick + 1 < ticks && interval > 0f) yield return new WaitForSeconds(interval);
             else yield return null;

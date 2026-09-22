@@ -1,0 +1,11 @@
+Model Information:
+* title:	Saiba Momoi
+* source:	https://sketchfab.com/3d-models/saiba-momoi-c871ceb14513491fbbf59d33190ba5a6
+* author:	Huses (https://sketchfab.com/Huses)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Saiba Momoi" (https://sketchfab.com/3d-models/saiba-momoi-c871ceb14513491fbbf59d33190ba5a6) by Huses (https://sketchfab.com/Huses) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

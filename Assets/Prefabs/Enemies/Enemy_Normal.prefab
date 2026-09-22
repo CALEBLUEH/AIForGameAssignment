@@ -75,10 +75,11 @@ MonoBehaviour:
   isBoss: 0
   isElite: 0
   characterData: {fileID: 0}
+  applyCharacterDataOnAwake: 1
   maxHealth: 140
   attackPower: 5.4
   defense: 5
-  attackRange: 5
+  attackRange: 30
   attackSpeed: 1
   resistance: 5
   skillPointRegeneration: 7
@@ -87,6 +88,8 @@ MonoBehaviour:
   manipulationRate: 1
   currentHealth: 0
   movementPoints: 0
+  shieldPoints: 0
+  shieldExpiresAt: 0
   isDead: 0
   activeStatuses: []
 --- !u!114 &3614039678339281282
@@ -131,6 +134,21 @@ MonoBehaviour:
   skillPowerMultiplier: 2.5
   skillHealAmount: 35
   aoeRadius: 4
+  skillDescription: 
+  targetSnapRadius: 2.2
+  coneAngle: 55
+  damageTickCount: 6
+  damageTickDuration: 2
+  shieldAmount: 80
+  shieldDuration: 8
+  shieldVisualRadius: 1.35
+  shieldMaterial: {fileID: 0}
+  skillWindup: 0.45
+  skillRecovery: 0.35
+  skillProjectileSpeed: 28
+  skillDropHeight: 9
+  skillDropDuration: 0.7
+  medKitPrefab: {fileID: 0}
   primaryEffect:
     type: 0
     amount: 0

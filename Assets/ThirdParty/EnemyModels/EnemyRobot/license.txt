@@ -1,0 +1,11 @@
+Model Information:
+* title:	[Blue Archive] Kaiser PMC Military Robots
+* source:	https://sketchfab.com/3d-models/blue-archive-kaiser-pmc-military-robots-0e4d8553a9314787a5207b3da2e79b98
+* author:	Muhamad Mirza Arrafi (https://sketchfab.com/nazidefenseforceofficial)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "[Blue Archive] Kaiser PMC Military Robots" (https://sketchfab.com/3d-models/blue-archive-kaiser-pmc-military-robots-0e4d8553a9314787a5207b3da2e79b98) by Muhamad Mirza Arrafi (https://sketchfab.com/nazidefenseforceofficial) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

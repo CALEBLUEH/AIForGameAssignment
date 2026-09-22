@@ -1,0 +1,11 @@
+Model Information:
+* title:	Kisaki Ball
+* source:	https://sketchfab.com/3d-models/kisaki-ball-b6f42dbe5cb54a99a148a62d09e32e7f
+* author:	copycatypo (https://sketchfab.com/copycatypo)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Kisaki Ball" (https://sketchfab.com/3d-models/kisaki-ball-b6f42dbe5cb54a99a148a62d09e32e7f) by copycatypo (https://sketchfab.com/copycatypo) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
