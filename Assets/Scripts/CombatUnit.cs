@@ -147,7 +147,11 @@ public class CombatUnit : MonoBehaviour
             {
                 Vector3 destination = transform.position + retreat.normalized * 0.8f;
                 if (UnityEngine.AI.NavMesh.SamplePosition(destination, out var hit, 1f, UnityEngine.AI.NavMesh.AllAreas))
-                    transform.position = hit.position;
+                {
+                    AutoCombatAI navigation = GetComponent<AutoCombatAI>();
+                    if (navigation != null) navigation.SetNavMeshPosition(hit.position);
+                    else transform.position = hit.position;
+                }
             }
         }
     }

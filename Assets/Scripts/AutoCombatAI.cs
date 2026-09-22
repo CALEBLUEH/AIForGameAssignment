@@ -19,6 +19,10 @@ public class AutoCombatAI : MonoBehaviour
     public float targetSearchInterval = 0.25f, pathUpdateInterval = 0.35f;
     public LayerMask sightBlockers;
     public float movementRange = 7f, movementCost = 35f, movementCooldown = 7f;
+    [Header("NavMesh grounding")]
+    [Tooltip("Keeps a capsule/model above the NavMesh instead of placing its body centre on the road.")]
+    [SerializeField] private bool deriveGroundOffsetFromCollider = true;
+    [Min(0f)] [SerializeField] private float groundOffset;
     [Header("Separation")]
     public float separationDistance = 1.35f;
     public float separationStrength = 0.7f;
@@ -81,6 +85,7 @@ public class AutoCombatAI : MonoBehaviour
     private Vector3 enemySpawnPosition;
     private bool enemyAggro;
     private float enemyLastSeenTime;
+    private float runtimeGroundOffset;
     public string CurrentState => currentState;
     public CombatUnit Unit => unit;
     public float MovementCooldownRemaining => Mathf.Max(0f, movementReadyAt - Time.time);
@@ -91,6 +96,9 @@ public class AutoCombatAI : MonoBehaviour
         unit = GetComponent<CombatUnit>();
         member = GetComponent<SquadMember>();
         path = new NavMeshPath();
+        runtimeGroundOffset = Mathf.Max(0f, groundOffset);
+        if (deriveGroundOffsetFromCollider && TryGetComponent(out Collider bodyCollider))
+            runtimeGroundOffset = Mathf.Max(0f, transform.position.y - bodyCollider.bounds.min.y);
 
         // Role is authoritative: Yuuka cannot accidentally hide because of Inspector settings.
         if (role == CombatRole.YuukaTank)
@@ -103,9 +111,32 @@ public class AutoCombatAI : MonoBehaviour
     private void Start()
     {
         // Keep the real Transform on the same NavMesh position used by CalculatePath.
-        if (NavMesh.SamplePosition(transform.position, out var hit, 2f, NavMesh.AllAreas))
-            transform.position = hit.position;
+        if (NavMesh.SamplePosition(NavMeshProbe(transform.position), out var hit, 2f, NavMesh.AllAreas))
+            SetNavMeshPosition(hit.position);
         enemySpawnPosition = transform.position;
+    }
+
+    public void ActivateAtSpawn(Vector3 navMeshPosition)
+    {
+        SetNavMeshPosition(navMeshPosition);
+        enemySpawnPosition = transform.position;
+        enemyAggro = true;
+        currentTarget = null;
+        nextSearch = 0f;
+        nextPath = 0f;
+        ClearPath();
+    }
+
+    public void SetNavMeshPosition(Vector3 navMeshPosition)
+    {
+        navMeshPosition.y += runtimeGroundOffset;
+        transform.position = navMeshPosition;
+    }
+
+    private Vector3 NavMeshProbe(Vector3 worldPosition)
+    {
+        worldPosition.y -= runtimeGroundOffset;
+        return worldPosition;
     }
 
     private void Update()
@@ -623,7 +654,7 @@ public class AutoCombatAI : MonoBehaviour
         float bestScore = float.PositiveInfinity;
         float radius = Mathf.Max(1.25f, unit.AttackRange * 0.82f);
         NavMeshPath testPath = new NavMeshPath();
-        if (!NavMesh.SamplePosition(transform.position, out var start, 1.5f, NavMesh.AllAreas)) return false;
+        if (!NavMesh.SamplePosition(NavMeshProbe(transform.position), out var start, 1.5f, NavMesh.AllAreas)) return false;
 
         // Search around the enemy for a reachable firing position with clear LOS.
         const int samples = 16;
@@ -651,7 +682,7 @@ public class AutoCombatAI : MonoBehaviour
         if (Distance(transform.position, destination) <= stopDistance) { ClearPath(); return; }
         if (Time.time < nextPath && HasPath()) return;
         nextPath = Time.time + pathUpdateInterval;
-        if (!NavMesh.SamplePosition(transform.position, out var start, 2f, NavMesh.AllAreas) ||
+        if (!NavMesh.SamplePosition(NavMeshProbe(transform.position), out var start, 2f, NavMesh.AllAreas) ||
             !NavMesh.SamplePosition(destination, out var end, 2f, NavMesh.AllAreas) ||
             !NavMesh.CalculatePath(start.position, end.position, NavMesh.AllAreas, path) ||
             path.status != NavMeshPathStatus.PathComplete)
@@ -674,7 +705,7 @@ public class AutoCombatAI : MonoBehaviour
         Vector3 forward = delta.normalized;
         Vector3 direction = forward;
 
-        if (allowSeparation && unit.team == CombatUnit.CombatTeam.Player)
+        if (allowSeparation)
         {
             Vector3 separation = SeparationVector();
             // Only use the sideways part. Separation may create spacing but may not
@@ -685,14 +716,14 @@ public class AutoCombatAI : MonoBehaviour
 
         float step = Mathf.Min(speed * Time.deltaTime, delta.magnitude);
         Vector3 candidate = transform.position + direction * step;
-        if (NavMesh.SamplePosition(candidate, out var hit, 0.45f, NavMesh.AllAreas))
-            transform.position = hit.position;
+        if (NavMesh.SamplePosition(NavMeshProbe(candidate), out var hit, 0.45f, NavMesh.AllAreas))
+            SetNavMeshPosition(hit.position);
         else
         {
             // Narrow passage fallback: ignore separation and preserve forward progress.
             candidate = transform.position + forward * step;
-            if (NavMesh.SamplePosition(candidate, out hit, 0.65f, NavMesh.AllAreas))
-                transform.position = hit.position;
+            if (NavMesh.SamplePosition(NavMeshProbe(candidate), out hit, 0.65f, NavMesh.AllAreas))
+                SetNavMeshPosition(hit.position);
             else
                 nextPath = 0f;
         }
@@ -718,7 +749,8 @@ public class AutoCombatAI : MonoBehaviour
         Vector3 separation = SeparationVector();
         if (separation.sqrMagnitude < 0.05f) return;
         Vector3 destination = transform.position + separation * separationStrength * Time.deltaTime;
-        if (NavMesh.SamplePosition(destination, out var hit, 0.4f, NavMesh.AllAreas)) transform.position = hit.position;
+        if (NavMesh.SamplePosition(NavMeshProbe(destination), out var hit, 0.4f, NavMesh.AllAreas))
+            SetNavMeshPosition(hit.position);
     }
 
     private void Face(Vector3 direction)
@@ -736,12 +768,12 @@ public class AutoCombatAI : MonoBehaviour
         ReleaseCover();
         Vector3 delta = destination - transform.position; delta.y = 0f;
         destination = transform.position + Vector3.ClampMagnitude(delta, movementRange);
-        if (!NavMesh.SamplePosition(transform.position, out var start, 2f, NavMesh.AllAreas) ||
+        if (!NavMesh.SamplePosition(NavMeshProbe(transform.position), out var start, 2f, NavMesh.AllAreas) ||
             !NavMesh.SamplePosition(destination, out var hit, 3f, NavMesh.AllAreas))
         { unit.RefundMovementPoints(movementCost); return false; }
         if (movementKind == MovementKind.Flash)
         {
-            transform.position = hit.position; ClearPath(); currentState = "Flashed";
+            SetNavMeshPosition(hit.position); ClearPath(); currentState = "Flashed";
             movementReadyAt = Time.time + movementCooldown; return true;
         }
         var movementPath = new NavMeshPath();

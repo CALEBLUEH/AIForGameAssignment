@@ -27,6 +27,9 @@ public class BattleDirector : MonoBehaviour
     public float timedEnemyDelay = 18f;
     public bool startImmediately;
     public string preparationSceneName = "Preparation";
+    [Header("Enemy waves")]
+    [Tooltip("When assigned, marker-based waves replace the legacy hardcoded enemy coordinates and boss sequence.")]
+    [SerializeField] private EnemyWaveSpawner enemyWaveSpawner;
     [Header("Boss configuration")]
     public string bossName = "Boss 1";
 
@@ -84,6 +87,8 @@ public class BattleDirector : MonoBehaviour
     public float UniversalPoints => universalPoints;
     public bool AutoEnabled => autoEnabled;
 
+    public void SetEnemyWaveSpawner(EnemyWaveSpawner spawner) => enemyWaveSpawner = spawner;
+
     [Header("Selected Attack Radius")]
     [SerializeField] private Material attackRadiusMaterial;
     [SerializeField] private float attackRadiusRingWidth = 0.18f;
@@ -116,6 +121,7 @@ public class BattleDirector : MonoBehaviour
         if (leaderIndex < 0) leaderIndex = 0;
         foreach (CombatUnit initialEnemy in initialEnemies)
         {
+            if (enemyWaveSpawner != null) break;
             GameObject template = Instantiate(initialEnemy.gameObject, transform);
             template.name = initialEnemy.name + " Spawn Template";
             template.SetActive(false);
@@ -225,6 +231,7 @@ public class BattleDirector : MonoBehaviour
         isPlaying = true;
         setupPanel.SetActive(false);
         battlePanel.SetActive(true);
+        if (enemyWaveSpawner != null) enemyWaveSpawner.BeginBattle();
         RefreshBattle();
     }
 
@@ -242,7 +249,16 @@ public class BattleDirector : MonoBehaviour
         int enemies = CountAlive(CombatUnit.CombatTeam.Enemy);
         int allies = CountAlive(CombatUnit.CombatTeam.Player);
         if (allies == 0) { Finish(false); return; }
-        if (phase == StagePhase.WaveOne && enemies == 0)
+        if (enemyWaveSpawner != null)
+        {
+            wave = Mathf.Max(1, enemyWaveSpawner.CurrentWave);
+            if (enemyWaveSpawner.FinishAfterLastWave && enemyWaveSpawner.IsComplete && enemies == 0)
+            {
+                Finish(true);
+                return;
+            }
+        }
+        else if (phase == StagePhase.WaveOne && enemies == 0)
         {
             phase = StagePhase.MovingToWaveTwo;
             nextPhaseTime = Time.time + 2f;
@@ -614,9 +630,11 @@ public class BattleDirector : MonoBehaviour
     private void RefreshBattle()
     {
         int enemies = CountAlive(CombatUnit.CombatTeam.Enemy);
-        string section = phase == StagePhase.MovingToWaveTwo ? "ADVANCING TO SECTION 2" :
-            phase == StagePhase.MovingToBoss ? "ADVANCING TO BOSS" :
-            phase == StagePhase.Boss ? "BOSS SECTION" : "WAVE " + wave;
+        string section = enemyWaveSpawner != null
+            ? enemyWaveSpawner.IsTransitioning ? "ENEMY REINFORCEMENTS INCOMING" : "WAVE " + Mathf.Max(1, enemyWaveSpawner.CurrentWave)
+            : phase == StagePhase.MovingToWaveTwo ? "ADVANCING TO SECTION 2" :
+                phase == StagePhase.MovingToBoss ? "ADVANCING TO BOSS" :
+                phase == StagePhase.Boss ? "BOSS SECTION" : "WAVE " + wave;
         statusText.text = "ASSAULT  •  " + section + "  •  Enemies " + enemies +
             "  •  Mana " + Mathf.FloorToInt(universalPoints) + "/" + universalCapacity;
         if (timerText != null) timerText.text = Mathf.FloorToInt(elapsed / 60f).ToString("00") + ":" +
