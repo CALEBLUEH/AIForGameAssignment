@@ -6,21 +6,20 @@ EditorBuildSettings:
   serializedVersion: 2
   m_Scenes:
   - enabled: 1
-  - enabled: 1
     path: Assets/Scenes/Login.unity
-    guid: 99c9720ab356a0642a771bea13969a05
+    guid: 953cd9c2ee94ba14b8b64003bd2dc6a1
   - enabled: 1
     path: Assets/Scenes/Lobby.unity
     guid: c82da7bd705f8924781930e12a6ff8a9
+  - enabled: 1
+    path: Assets/Scenes/LevelSelection.unity
+    guid: 54750ade6a064404cb7613f6dd0369ed
   - enabled: 1
     path: Assets/Scenes/Mission.unity
     guid: 3c092a09d37fe34469d7b25dac92b016
   - enabled: 1
     path: Assets/Scenes/Game Scene Ui.unity
-    guid: 9320d51422e67c94b82f4981881c7ac4
-  - enabled: 1
-    path: Assets/Scenes/LevelSelection.unity
-    guid: 54750ade6a064404cb7613f6dd0369ed
+    guid: ce33e1337ef53ee4eab67aea430b59b5
   - enabled: 1
     path: Assets/Scenes/Preparation.unity
     guid: 36ff8f55c0ee409409c4a84570a64a92
@@ -29,10 +28,10 @@ EditorBuildSettings:
     guid: e38d39eab4f95f54aa4b14183aa0572c
   - enabled: 1
     path: Assets/Scenes/GameplayLevel2.unity
-    guid: 2fbd7b186a0b7f643bf19f92715d689f
+    guid: f1f6b80f6af84634eb8b8cf592b5d2a9
   - enabled: 1
     path: Assets/Scenes/GameplayLevel3.unity
-    guid: 3b734d54fe4261b4a91212480b2afae3
+    guid: eb7e65ebdc279aa498865e6a28e4df3f
   m_configObjects:
     com.unity.input.settings.actions: {fileID: -944628639613478452, guid: 052faaac586de48259a63d0c4782560b, type: 3}
   m_UseUCBPForAssetBundles: 0
