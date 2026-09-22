@@ -1,0 +1,333 @@
+{
+  "accessors": [
+    {
+      "bufferView": 2,
+      "componentType": 5126,
+      "count": 60480,
+      "max": [
+        -21048.248046875,
+        41646.70703125,
+        8244.3203125
+      ],
+      "min": [
+        -32630.220703125,
+        20887.341796875,
+        -4454.7255859375
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 2,
+      "byteOffset": 725760,
+      "componentType": 5126,
+      "count": 60480,
+      "max": [
+        0.9999949932098389,
+        0.9999986290931702,
+        0.9999681115150452
+      ],
+      "min": [
+        -0.9999975562095642,
+        -0.9999971985816956,
+        -0.9999828934669495
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 1,
+      "componentType": 5126,
+      "count": 60480,
+      "max": [
+        0.9984009861946106,
+        0.9990220069885254
+      ],
+      "min": [
+        0.0009769999887794256,
+        0.1725499927997589
+      ],
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 0,
+      "componentType": 5125,
+      "count": 269178,
+      "type": "SCALAR"
+    },
+    {
+      "bufferView": 2,
+      "byteOffset": 1451520,
+      "componentType": 5126,
+      "count": 499,
+      "max": [
+        -24397.53515625,
+        39834.69140625,
+        8122.31640625
+      ],
+      "min": [
+        -32513.341796875,
+        27231.109375,
+        -4328.16015625
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 2,
+      "byteOffset": 1457508,
+      "componentType": 5126,
+      "count": 499,
+      "max": [
+        0.9960962533950806,
+        0.9999854564666748,
+        0.9983739852905273
+      ],
+      "min": [
+        -0.995791494846344,
+        -0.8997505903244019,
+        -0.992584228515625
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 0,
+      "byteOffset": 1076712,
+      "componentType": 5125,
+      "count": 1254,
+      "type": "SCALAR"
+    },
+    {
+      "bufferView": 2,
+      "byteOffset": 1463496,
+      "componentType": 5126,
+      "count": 77,
+      "max": [
+        -23073.177734375,
+        41646.70703125,
+        -2120.737548828125
+      ],
+      "min": [
+        -25175.986328125,
+        41646.70703125,
+        -3009.045166015625
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 2,
+      "byteOffset": 1464420,
+      "componentType": 5126,
+      "count": 77,
+      "max": [
+        0.8977352380752563,
+        0.9999986290931702,
+        0.6703932881355286
+      ],
+      "min": [
+        -0.7763512134552002,
+        -0.9666225910186768,
+        -0.8597152233123779
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 0,
+      "byteOffset": 1081728,
+      "componentType": 5125,
+      "count": 207,
+      "type": "SCALAR"
+    }
+  ],
+  "asset": {
+    "extras": {
+      "author": "jvouillon (https://sketchfab.com/jvouillon)",
+      "license": "CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)",
+      "source": "https://sketchfab.com/3d-models/fire-hydrant-7f9164e6018c4ec7a3585bbf6e6d70df",
+      "title": "Fire Hydrant"
+    },
+    "generator": "Sketchfab-12.63.0",
+    "version": "2.0"
+  },
+  "bufferViews": [
+    {
+      "buffer": 0,
+      "byteLength": 1082556,
+      "name": "floatBufferViews",
+      "target": 34963
+    },
+    {
+      "buffer": 0,
+      "byteLength": 483840,
+      "byteOffset": 1082556,
+      "byteStride": 8,
+      "name": "floatBufferViews",
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 1465344,
+      "byteOffset": 1566396,
+      "byteStride": 12,
+      "name": "floatBufferViews",
+      "target": 34962
+    }
+  ],
+  "buffers": [
+    {
+      "byteLength": 3031740,
+      "uri": "scene.bin"
+    }
+  ],
+  "images": [
+    {
+      "uri": "textures/Material_0_baseColor.jpeg"
+    }
+  ],
+  "materials": [
+    {
+      "doubleSided": true,
+      "name": "Material_0",
+      "pbrMetallicRoughness": {
+        "baseColorTexture": {
+          "index": 0
+        },
+        "metallicFactor": 0.22,
+        "roughnessFactor": 0.5623440366802793
+      }
+    },
+    {
+      "doubleSided": true,
+      "name": "Material_1",
+      "pbrMetallicRoughness": {
+        "metallicFactor": 0.0,
+        "roughnessFactor": 0.2
+      }
+    },
+    {
+      "doubleSided": true,
+      "name": "Material_2",
+      "pbrMetallicRoughness": {
+        "baseColorFactor": [
+          0.5,
+          0.5,
+          0.5,
+          1.0
+        ],
+        "metallicFactor": 0.0,
+        "roughnessFactor": 0.2
+      }
+    }
+  ],
+  "meshes": [
+    {
+      "name": "Object_0",
+      "primitives": [
+        {
+          "attributes": {
+            "NORMAL": 1,
+            "POSITION": 0,
+            "TEXCOORD_0": 2
+          },
+          "indices": 3,
+          "material": 0,
+          "mode": 4
+        }
+      ]
+    },
+    {
+      "name": "Object_1",
+      "primitives": [
+        {
+          "attributes": {
+            "NORMAL": 5,
+            "POSITION": 4
+          },
+          "indices": 6,
+          "material": 1,
+          "mode": 4
+        }
+      ]
+    },
+    {
+      "name": "Object_2",
+      "primitives": [
+        {
+          "attributes": {
+            "NORMAL": 8,
+            "POSITION": 7
+          },
+          "indices": 9,
+          "material": 2,
+          "mode": 4
+        }
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "children": [
+        1
+      ],
+      "matrix": [
+        4.166666622040793e-05,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        -4.166666622040793e-05,
+        -9.251858439453627e-21,
+        0.0,
+        0.0,
+        9.251858439453627e-21,
+        -4.166666622040793e-05,
+        0.0,
+        0.0,
+        33161.78125000001,
+        -29372.171874999993,
+        1.0
+      ],
+      "name": "Sketchfab_model"
+    },
+    {
+      "children": [
+        2,
+        3,
+        4
+      ],
+      "name": "Hydrant-88K.obj.cleaner.gles"
+    },
+    {
+      "mesh": 0,
+      "name": "Object_2"
+    },
+    {
+      "mesh": 1,
+      "name": "Object_3"
+    },
+    {
+      "mesh": 2,
+      "name": "Object_4"
+    }
+  ],
+  "samplers": [
+    {
+      "magFilter": 9729,
+      "minFilter": 9987,
+      "wrapS": 10497,
+      "wrapT": 10497
+    }
+  ],
+  "scene": 0,
+  "scenes": [
+    {
+      "name": "Sketchfab_Scene",
+      "nodes": [
+        0
+      ]
+    }
+  ],
+  "textures": [
+    {
+      "sampler": 0,
+      "source": 0
+    }
+  ]
+}

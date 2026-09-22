@@ -1,0 +1,11 @@
+Model Information:
+* title:	Kenworth W-900 A 1973 Timber Carrier
+* source:	https://sketchfab.com/3d-models/kenworth-w-900-a-1973-timber-carrier-7457a6729081456fb0b9cabf57fc1734
+* author:	eightismore (https://sketchfab.com/eightismore)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Kenworth W-900 A 1973 Timber Carrier" (https://sketchfab.com/3d-models/kenworth-w-900-a-1973-timber-carrier-7457a6729081456fb0b9cabf57fc1734) by eightismore (https://sketchfab.com/eightismore) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

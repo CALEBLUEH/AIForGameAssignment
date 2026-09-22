@@ -464,20 +464,63 @@ public static class CharacterStateSandboxBuilder
         }
         if (isEyebrow && sourceMaterial != null && sourceTexture == null)
             material.color = sourceMaterial.color;
-        ConfigureFaceTransparency(material, sourceName, texture);
+        ConfigureFaceTransparency(material, character, sourceName, texture);
         EditorUtility.SetDirty(material);
         return material;
     }
 
-    private static void ConfigureFaceTransparency(Material material, string sourceName, Texture2D texture)
+    private static void ConfigureFaceTransparency(Material material, string character, string sourceName, Texture2D texture)
     {
         bool isEyeMouth = sourceName.IndexOf("EyeMouth", StringComparison.OrdinalIgnoreCase) >= 0 ||
                           sourceName.IndexOf("Mouth", StringComparison.OrdinalIgnoreCase) >= 0;
         TextureImporter importer = texture == null ? null : AssetImporter.GetAtPath(AssetDatabase.GetAssetPath(texture)) as TextureImporter;
         bool useAlphaClip = isEyeMouth && importer != null && importer.DoesSourceTextureHaveAlpha();
+        bool useColorKey = isEyeMouth && !useAlphaClip &&
+                           (character == "Momoi" || character == "Mika" || character == "Yuuka");
+        bool useMouthAtlas = isEyeMouth && character != "Hina";
         if (material.HasProperty("_AlphaClip")) material.SetFloat("_AlphaClip", useAlphaClip ? 1f : 0f);
         if (material.HasProperty("_Cutoff")) material.SetFloat("_Cutoff", 0.08f);
-        material.renderQueue = useAlphaClip ? (int)UnityEngine.Rendering.RenderQueue.AlphaTest : -1;
+        if (material.HasProperty("_ColorKeyEnabled")) material.SetFloat("_ColorKeyEnabled", useColorKey ? 1f : 0f);
+        if (material.HasProperty("_UseMouthAtlas")) material.SetFloat("_UseMouthAtlas", useMouthAtlas ? 1f : 0f);
+        if (material.HasProperty("_MouthTex"))
+        {
+            Texture2D mouthAtlas = AssetDatabase.LoadAssetAtPath<Texture2D>(
+                "Assets/ThirdParty/BlueArchiveModels/Halano/Hina/Hina_Mouth.png");
+            material.SetTexture("_MouthTex", mouthAtlas);
+            material.SetVector("_MouthUvOffset", new Vector4(0f, 0.75f, 0f, 0f));
+            material.SetColor("_MouthKeyColor", Color.white);
+            material.SetFloat("_MouthKeyTolerance", 0.035f);
+        }
+        if (material.HasProperty("_ColorKey1") && material.HasProperty("_ColorKey2"))
+        {
+            Color firstKey = Color.white;
+            Color secondKey = Color.white;
+            float tolerance = 0.03f;
+            if (character == "Momoi")
+            {
+                firstKey = Color.black;
+                secondKey = Color.white;
+                tolerance = 0.025f;
+            }
+            else if (character == "Mika")
+            {
+                firstKey = new Color(117f / 255f, 103f / 255f, 128f / 255f, 1f);
+                secondKey = new Color(118f / 255f, 105f / 255f, 130f / 255f, 1f);
+                tolerance = 0.045f;
+            }
+            else if (character == "Yuuka")
+            {
+                firstKey = Color.white;
+                secondKey = Color.black;
+                tolerance = 0.04f;
+            }
+            material.SetColor("_ColorKey1", firstKey);
+            material.SetColor("_ColorKey2", secondKey);
+            material.SetFloat("_ColorKeyTolerance", tolerance);
+        }
+        material.renderQueue = useAlphaClip || useColorKey
+            ? (int)UnityEngine.Rendering.RenderQueue.AlphaTest
+            : -1;
         material.SetShaderPassEnabled("SHADOWCASTER", !isEyeMouth);
     }
 

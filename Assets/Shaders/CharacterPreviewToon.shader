@@ -13,6 +13,15 @@ Shader "AIFG/Character Preview Toon"
         _RimStrength ("Rim Strength", Range(0, 1)) = 0.12
         [Toggle] _AlphaClip ("Use Texture Transparency", Float) = 0
         _Cutoff ("Alpha Cutoff", Range(0, 1)) = 0.08
+        [Toggle] _ColorKeyEnabled ("Remove Opaque Overlay Background", Float) = 0
+        _ColorKey1 ("Overlay Background Color 1", Color) = (1, 1, 1, 1)
+        _ColorKey2 ("Overlay Background Color 2", Color) = (1, 1, 1, 1)
+        _ColorKeyTolerance ("Overlay Background Tolerance", Range(0.001, 0.25)) = 0.03
+        _MouthTex ("Shared Mouth Atlas", 2D) = "white" {}
+        [Toggle] _UseMouthAtlas ("Use Shared Neutral Mouth", Float) = 0
+        _MouthUvOffset ("Mouth Atlas UV Offset", Vector) = (0, 0.75, 0, 0)
+        _MouthKeyColor ("Mouth Atlas Background", Color) = (1, 1, 1, 1)
+        _MouthKeyTolerance ("Mouth Background Tolerance", Range(0.001, 0.25)) = 0.035
     }
 
     SubShader
@@ -39,6 +48,7 @@ Shader "AIFG/Character Preview Toon"
 
             sampler2D _MainTex;
             float4 _MainTex_ST;
+            sampler2D _MouthTex;
             fixed4 _Color;
             fixed4 _ShadowColor;
             half _ShadowThreshold;
@@ -49,6 +59,14 @@ Shader "AIFG/Character Preview Toon"
             half _RimStrength;
             half _AlphaClip;
             half _Cutoff;
+            half _ColorKeyEnabled;
+            fixed4 _ColorKey1;
+            fixed4 _ColorKey2;
+            half _ColorKeyTolerance;
+            half _UseMouthAtlas;
+            float4 _MouthUvOffset;
+            fixed4 _MouthKeyColor;
+            half _MouthKeyTolerance;
 
             struct appdata
             {
@@ -79,8 +97,21 @@ Shader "AIFG/Character Preview Toon"
 
             fixed4 frag(v2f input) : SV_Target
             {
-                fixed4 albedo = tex2D(_MainTex, input.uv) * _Color;
+                fixed4 textureColor = tex2D(_MainTex, input.uv);
+                half mouthRegion = _UseMouthAtlas > 0.5h && input.uv.x < 0.25h && input.uv.y < 0.23h
+                    ? 1.0h
+                    : 0.0h;
+                if (mouthRegion > 0.5h)
+                    textureColor = tex2D(_MouthTex, input.uv + _MouthUvOffset.xy);
+                fixed4 albedo = textureColor * _Color;
                 clip(_AlphaClip < 0.5h ? 1.0h : albedo.a - _Cutoff);
+                half overlayKeyDistance = min(distance(textureColor.rgb, _ColorKey1.rgb),
+                                              distance(textureColor.rgb, _ColorKey2.rgb));
+                half mouthKeyDistance = distance(textureColor.rgb, _MouthKeyColor.rgb);
+                half keyEnabled = mouthRegion > 0.5h ? 1.0h : _ColorKeyEnabled;
+                half keyDistance = mouthRegion > 0.5h ? mouthKeyDistance : overlayKeyDistance;
+                half keyTolerance = mouthRegion > 0.5h ? _MouthKeyTolerance : _ColorKeyTolerance;
+                clip(keyEnabled < 0.5h ? 1.0h : keyDistance - keyTolerance);
                 half3 normal = normalize(input.worldNormal);
                 half3 lightDirection = normalize(UnityWorldSpaceLightDir(input.worldPosition));
                 half3 viewDirection = normalize(UnityWorldSpaceViewDir(input.worldPosition));

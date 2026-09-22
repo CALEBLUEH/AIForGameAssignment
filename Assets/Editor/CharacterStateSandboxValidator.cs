@@ -24,6 +24,14 @@ public static class CharacterStateSandboxValidator
     private static readonly string YuukaAttackScreenshotPath = Path.Combine(Path.GetTempPath(), "AIForGameAssignment-CharacterSandbox-Yuuka-Attack.png");
     private static readonly string YuukaWeapon1ScreenshotPath = Path.Combine(Path.GetTempPath(), "AIForGameAssignment-CharacterSandbox-Yuuka-Weapon1.png");
     private static readonly string YuukaWeapon2ScreenshotPath = Path.Combine(Path.GetTempPath(), "AIForGameAssignment-CharacterSandbox-Yuuka-Weapon2.png");
+    private static readonly string[] FaceScreenshotPaths =
+    {
+        Path.Combine(Path.GetTempPath(), "AIForGameAssignment-CharacterSandbox-Hina-Face.png"),
+        Path.Combine(Path.GetTempPath(), "AIForGameAssignment-CharacterSandbox-Momoi-Face.png"),
+        Path.Combine(Path.GetTempPath(), "AIForGameAssignment-CharacterSandbox-Mika-Face.png"),
+        Path.Combine(Path.GetTempPath(), "AIForGameAssignment-CharacterSandbox-Ayane-Face.png"),
+        Path.Combine(Path.GetTempPath(), "AIForGameAssignment-CharacterSandbox-Yuuka-Face.png")
+    };
     private static readonly string MomoiRetreatScreenshotPath = Path.Combine(Path.GetTempPath(), "AIForGameAssignment-CharacterSandbox-Momoi-Retreat.png");
     private static readonly string MomoiCoverScreenshotPath = Path.Combine(Path.GetTempPath(), "AIForGameAssignment-CharacterSandbox-Momoi-Cover.png");
 
@@ -94,6 +102,9 @@ public static class CharacterStateSandboxValidator
                 AnimationMode.SampleAnimationClip(animator.gameObject, attack, 0.20f);
                 SaveCameraRender(camera, index == 0 ? HinaAttackScreenshotPath :
                     index == 1 ? MomoiAttackScreenshotPath : GetAdditionalAttackScreenshotPath(index));
+                Transform head = animator.GetBoneTransform(HumanBodyBones.Head);
+                if (head == null) throw new InvalidOperationException("Character at index " + index + " has no head bone.");
+                SaveFaceRender(camera, head.position, FaceScreenshotPaths[index]);
             }
 
             MeshRenderer[] yuukaWeapons = GetSelectedWeapons(preview, 4);
@@ -136,6 +147,26 @@ public static class CharacterStateSandboxValidator
             RenderTexture.active = previousActive;
             UnityEngine.Object.DestroyImmediate(image);
             UnityEngine.Object.DestroyImmediate(renderTexture);
+        }
+    }
+
+    private static void SaveFaceRender(Camera camera, Vector3 headPosition, string path)
+    {
+        Vector3 previousPosition = camera.transform.position;
+        Quaternion previousRotation = camera.transform.rotation;
+        float previousFieldOfView = camera.fieldOfView;
+        try
+        {
+            Vector3 viewDirection = (previousPosition - headPosition).normalized;
+            camera.transform.position = headPosition + viewDirection * 0.65f;
+            camera.transform.LookAt(headPosition);
+            camera.fieldOfView = 32f;
+            SaveCameraRender(camera, path);
+        }
+        finally
+        {
+            camera.transform.SetPositionAndRotation(previousPosition, previousRotation);
+            camera.fieldOfView = previousFieldOfView;
         }
     }
 
@@ -416,11 +447,45 @@ public static class CharacterStateSandboxValidator
             if (clip == null || !clip.isLooping) throw new InvalidOperationException(state + " clip is missing or not looping.");
         }
         ValidateRequestedPoseCurves();
+        ValidateFaceOverlayMaterials();
 
         int missingScripts = 0;
         foreach (GameObject root in SceneManager.GetActiveScene().GetRootGameObjects())
             missingScripts += CountMissingScripts(root);
         if (missingScripts != 0) throw new InvalidOperationException("Scene contains " + missingScripts + " missing script references.");
+    }
+
+    private static void ValidateFaceOverlayMaterials()
+    {
+        string[] characters = { "Hina", "Momoi", "Mika", "Ayane", "Yuuka" };
+        foreach (string character in characters)
+        {
+            string[] materialGuids = AssetDatabase.FindAssets("t:Material", new[] { "Assets/Materials/CharacterPreview" });
+            Material eyeMouth = materialGuids.Select(AssetDatabase.GUIDToAssetPath)
+                .Where(path => Path.GetFileNameWithoutExtension(path)
+                    .StartsWith(character + "_", StringComparison.OrdinalIgnoreCase))
+                .Select(path => AssetDatabase.LoadAssetAtPath<Material>(path))
+                .FirstOrDefault(material => material != null &&
+                    material.name.IndexOf("EyeMouth", StringComparison.OrdinalIgnoreCase) >= 0);
+            if (eyeMouth == null) throw new InvalidOperationException(character + " EyeMouth preview material is missing.");
+
+            bool expectsSourceAlpha = character == "Hina" || character == "Ayane";
+            bool alphaEnabled = eyeMouth.HasProperty("_AlphaClip") && eyeMouth.GetFloat("_AlphaClip") > 0.5f;
+            bool colorKeyEnabled = eyeMouth.HasProperty("_ColorKeyEnabled") &&
+                                   eyeMouth.GetFloat("_ColorKeyEnabled") > 0.5f;
+            if (alphaEnabled != expectsSourceAlpha || colorKeyEnabled == expectsSourceAlpha)
+                throw new InvalidOperationException(character + " EyeMouth transparency mode is incorrect.");
+            bool expectsMouthAtlas = character != "Hina";
+            bool mouthAtlasEnabled = eyeMouth.HasProperty("_UseMouthAtlas") &&
+                                     eyeMouth.GetFloat("_UseMouthAtlas") > 0.5f;
+            if (mouthAtlasEnabled != expectsMouthAtlas ||
+                (mouthAtlasEnabled && eyeMouth.GetTexture("_MouthTex") == null))
+                throw new InvalidOperationException(character + " neutral mouth atlas assignment is incorrect.");
+            if (eyeMouth.renderQueue != (int)UnityEngine.Rendering.RenderQueue.AlphaTest)
+                throw new InvalidOperationException(character + " EyeMouth material is not in the alpha-test queue.");
+            if (eyeMouth.GetShaderPassEnabled("SHADOWCASTER"))
+                throw new InvalidOperationException(character + " EyeMouth material still casts a face-blocking shadow.");
+        }
     }
 
     private static int CountMissingScripts(GameObject gameObject)

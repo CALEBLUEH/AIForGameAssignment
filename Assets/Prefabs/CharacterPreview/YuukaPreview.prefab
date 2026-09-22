@@ -49,7 +49,7 @@ MonoBehaviour:
   visualRoot: {fileID: 5873416392267699929}
   footToSoleDistance: 0.082367964
   groundOffset: 0
---- !u!1 &8344781420347203369
+--- !u!1 &7113207135416441884
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -57,46 +57,46 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 2537636870804580181}
-  - component: {fileID: 8829293847985340887}
-  - component: {fileID: 4206555564575535337}
+  - component: {fileID: 6941907746199125804}
+  - component: {fileID: 6941936813570368362}
+  - component: {fileID: 6264818675993353417}
   m_Layer: 0
-  m_Name: Yuuka Weapon 1
+  m_Name: Yuuka Weapon 2
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!4 &2537636870804580181
+--- !u!4 &6941907746199125804
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 8344781420347203369}
+  m_GameObject: {fileID: 7113207135416441884}
   serializedVersion: 2
-  m_LocalRotation: {x: -0.3119343, y: -0.85786444, z: 0.37796164, w: -0.1546306}
-  m_LocalPosition: {x: -0.00249, y: 0.00289, z: -0.00426}
+  m_LocalRotation: {x: -0.17528385, y: -0.8482344, z: 0.4757757, w: -0.15300778}
+  m_LocalPosition: {x: -0.00218, y: 0.00034, z: -0.00177}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 3159057047334881092}
-  m_LocalEulerAnglesHint: {x: -228.155, y: -2.5350037, z: -141.169}
---- !u!33 &8829293847985340887
+  m_LocalEulerAnglesHint: {x: -239.40399, y: 349.497, z: 197.34799}
+--- !u!33 &6941936813570368362
 MeshFilter:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 8344781420347203369}
-  m_Mesh: {fileID: 4300000, guid: 1d601fee7abede1469e8ceb2741f50c9, type: 2}
---- !u!23 &4206555564575535337
+  m_GameObject: {fileID: 7113207135416441884}
+  m_Mesh: {fileID: 4300000, guid: 8e072c82b0dc3a54093c3c18cad561a0, type: 2}
+--- !u!23 &6264818675993353417
 MeshRenderer:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 8344781420347203369}
+  m_GameObject: {fileID: 7113207135416441884}
   m_Enabled: 1
   m_CastShadows: 1
   m_ReceiveShadows: 1
@@ -272,7 +272,7 @@ PrefabInstance:
     m_AddedGameObjects:
     - targetCorrespondingSourceObject: {fileID: 9069987758964536950, guid: 6ce93b870f3350748aa11481a448646b, type: 3}
       insertIndex: -1
-      addedObject: {fileID: 2537636870804580181}
+      addedObject: {fileID: 6941907746199125804}
     m_AddedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: 6ce93b870f3350748aa11481a448646b, type: 3}
 --- !u!95 &532196353521962147 stripped
