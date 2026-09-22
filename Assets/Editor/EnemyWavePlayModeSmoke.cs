@@ -71,7 +71,8 @@ public static class EnemyWavePlayModeSmoke
             CombatUnit[] enemies = ActiveEnemies();
             if (phase == 0)
             {
-                if (spawner.CurrentWave != 1 || enemies.Length != 3) return;
+                int expectedCount = ExpectedEnemyCount(1);
+                if (spawner.CurrentWave != 1 || expectedCount <= 0 || enemies.Length != expectedCount) return;
                 ValidateUnitsAndPaths(enemies, 1);
                 foreach (CombatUnit enemy in enemies) enemy.TakeDamage(999999f);
                 SessionState.SetInt(PhaseKey, 1);
@@ -80,9 +81,10 @@ public static class EnemyWavePlayModeSmoke
             }
             else if (phase == 1)
             {
-                if (spawner.CurrentWave != 2 || enemies.Length != 3) return;
+                int expectedCount = ExpectedEnemyCount(2);
+                if (spawner.CurrentWave != 2 || expectedCount <= 0 || enemies.Length != expectedCount) return;
                 ValidateUnitsAndPaths(enemies, 2);
-                Debug.Log("ENEMY_WAVE_PLAYMODE_OK: wave 1 and wave 2 spawned 3 grounded, pursuing, reachable enemies each.");
+                Debug.Log($"ENEMY_WAVE_PLAYMODE_OK: configured waves spawned grounded, pursuing, reachable enemies (wave 1={ExpectedEnemyCount(1)}, wave 2={expectedCount}).");
                 SessionState.SetBool(SuccessKey, true);
                 SessionState.SetInt(PhaseKey, 99);
                 EditorApplication.isPlaying = false;
@@ -104,6 +106,13 @@ public static class EnemyWavePlayModeSmoke
             .ToArray();
     }
 
+    private static int ExpectedEnemyCount(int wave)
+    {
+        return Object.FindObjectsByType<EnemySpawnPoint>(FindObjectsSortMode.None)
+            .Where(point => point.WaveNumber == wave)
+            .Sum(point => point.TotalEnemyCount);
+    }
+
     private static void ValidateUnitsAndPaths(CombatUnit[] enemies, int wave)
     {
         CombatUnit player = Object.FindObjectsByType<CombatUnit>(FindObjectsSortMode.None)
@@ -115,8 +124,10 @@ public static class EnemyWavePlayModeSmoke
         foreach (CombatUnit enemy in enemies)
         {
             AutoCombatAI ai = enemy.GetComponent<AutoCombatAI>();
+            EnemyFormationMember formation = enemy.GetComponent<EnemyFormationMember>();
             CapsuleCollider body = enemy.GetComponent<CapsuleCollider>();
-            if (ai == null || body == null) throw new InvalidOperationException(enemy.name + " is missing its AI or capsule body.");
+            if (ai == null || body == null || formation == null)
+                throw new InvalidOperationException(enemy.name + " is missing its AI, formation membership, or capsule body.");
             if (ai.CurrentState == "Guarding" || ai.CurrentState == "No path" || ai.CurrentState == "Waiting")
                 throw new InvalidOperationException(enemy.name + " did not begin pursuing the player; state=" + ai.CurrentState);
             if (!NavMesh.SamplePosition(enemy.transform.position, out NavMeshHit enemyHit, 3f, NavMesh.AllAreas))

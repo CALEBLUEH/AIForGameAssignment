@@ -117,8 +117,8 @@ MonoBehaviour:
   movementCooldown: 7
   deriveGroundOffsetFromCollider: 1
   groundOffset: 0
-  separationDistance: 1.35
-  separationStrength: 0.7
+  separationDistance: 2
+  separationStrength: 1
   coverPreference: 2
   frontlineUnit: 0
   frontlineCoverHealthThreshold: 0.4

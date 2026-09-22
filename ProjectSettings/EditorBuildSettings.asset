@@ -32,6 +32,12 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/Scenes/GameplayLevel3.unity
     guid: eb7e65ebdc279aa498865e6a28e4df3f
+  - enabled: 1
+    path: Assets/Scenes/SandBox_Preparation.unity
+    guid: 8e5fe22cd9faed446a44d2ba4e7195c2
+  - enabled: 1
+    path: Assets/Scenes/Sandbox_Gameplay.unity
+    guid: b1ad304c3fd2832409a40f87268e03de
   m_configObjects:
     com.unity.input.settings.actions: {fileID: -944628639613478452, guid: 052faaac586de48259a63d0c4782560b, type: 3}
   m_UseUCBPForAssetBundles: 0

@@ -155,6 +155,41 @@ public static class EnvironmentModelImporter
         Debug.Log($"Environment import complete. Created {createdPrefabs} prefabs.\nNotes:\n- {noteText}");
     }
 
+    public static GameObject ImportStandaloneModel(string assetFolder, string prefabName,
+        string prefabPath, float targetLargestDimension)
+    {
+        string gltfPath = assetFolder.TrimEnd('/') + "/scene.gltf";
+        if (!File.Exists(ToAbsolutePath(gltfPath)))
+            throw new FileNotFoundException("Missing glTF source", gltfPath);
+
+        GltfRoot gltf = JsonUtility.FromJson<GltfRoot>(File.ReadAllText(ToAbsolutePath(gltfPath)));
+        if (gltf == null) throw new InvalidDataException("Could not parse " + gltfPath);
+        var context = new ImportContext(gltf, gltfPath, assetFolder.TrimEnd('/'));
+        GameObject model = context.BuildScene(prefabName + " Model");
+        Renderer[] renderers = model.GetComponentsInChildren<Renderer>(true);
+        if (renderers.Length == 0)
+        {
+            Object.DestroyImmediate(model);
+            throw new InvalidDataException(prefabName + " contains no renderable triangle meshes.");
+        }
+
+        Bounds bounds = renderers[0].bounds;
+        for (int i = 1; i < renderers.Length; i++) bounds.Encapsulate(renderers[i].bounds);
+        float largest = Mathf.Max(bounds.size.x, bounds.size.y, bounds.size.z);
+        float scale = targetLargestDimension / Mathf.Max(0.0001f, largest);
+        model.transform.localScale = Vector3.one * scale;
+
+        bounds = model.GetComponentsInChildren<Renderer>(true)[0].bounds;
+        foreach (Renderer renderer in model.GetComponentsInChildren<Renderer>(true)) bounds.Encapsulate(renderer.bounds);
+        GameObject wrapper = new GameObject(prefabName);
+        model.transform.SetParent(wrapper.transform, true);
+        model.transform.position -= new Vector3(bounds.center.x, bounds.min.y, bounds.center.z);
+        SavePrefab(wrapper, prefabPath);
+        Object.DestroyImmediate(wrapper);
+        AssetDatabase.SaveAssets();
+        return AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
+    }
+
     private static ImportSpec Road(string source, string name, float sourceScale = 1f) => new ImportSpec
     {
         relativeSource = source, outputGroup = "Road", prefabName = name,

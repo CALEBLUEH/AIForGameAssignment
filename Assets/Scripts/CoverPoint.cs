@@ -13,22 +13,32 @@ public class CoverPoint : MonoBehaviour
     [Range(0f, 0.95f)] public float protection = 0.35f;
     public float occupancyRadius = 0.45f;
     public float coverCheckHeight = 1.0f;
+    [SerializeField] private TacticalCoverObstacle obstacle;
 
     public bool IsAvailable => occupant == null;
-    public bool IsAbandoned => false;
+    public bool IsAbandoned => obstacle != null && obstacle.HasAnyAbandonedTeam;
     public CombatUnit Occupant => occupant;
     public bool IsReservedBy(CombatUnit unit) => occupant == unit;
     private CombatUnit occupant;
+
+    private void Awake()
+    {
+        if (obstacle == null) obstacle = GetComponentInParent<TacticalCoverObstacle>();
+    }
 
     private void OnEnable() { if (!All.Contains(this)) All.Add(this); }
     private void OnDisable() { All.Remove(this); Release(occupant); }
 
     public bool TryReserve(CombatUnit unit)
     {
-        if (unit == null || (occupant != null && occupant != unit)) return false;
+        if (!CanBeUsedBy(unit)) return false;
         occupant = unit;
         return true;
     }
+
+    public bool CanBeUsedBy(CombatUnit unit) => unit != null &&
+        (occupant == null || occupant == unit) &&
+        (obstacle == null || !obstacle.IsAbandonedFor(unit.team));
 
     public void Occupy(CombatUnit unit)
     {
@@ -58,7 +68,20 @@ public class CoverPoint : MonoBehaviour
         occupant = null;
     }
 
-    public void Abandon(CombatUnit unit) => Release(unit);
+    public void Abandon(CombatUnit unit)
+    {
+        if (unit == null) return;
+        if (obstacle != null) obstacle.AbandonFor(unit.team);
+        else Release(unit);
+    }
+
+    public void Configure(Collider physicalCover, TacticalCoverObstacle owner, float configuredProtection, float configuredOccupancyRadius)
+    {
+        coverCollider = physicalCover;
+        obstacle = owner;
+        protection = Mathf.Clamp(configuredProtection, 0f, 0.95f);
+        occupancyRadius = Mathf.Max(0.1f, configuredOccupancyRadius);
+    }
 
     private void OnDrawGizmosSelected()
     {

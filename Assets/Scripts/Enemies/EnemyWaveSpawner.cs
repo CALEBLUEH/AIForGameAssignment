@@ -94,13 +94,18 @@ public class EnemyWaveSpawner : MonoBehaviour
         foreach (EnemySpawnPoint point in spawnPoints)
         {
             if (point == null || point.WaveNumber != waveNumber) continue;
+            GameObject formationObject = new GameObject($"Wave {waveNumber} {point.FormationShape} Formation");
+            EnemyFormationCoordinator formation = formationObject.AddComponent<EnemyFormationCoordinator>();
+            formation.Configure(point.FormationShape, point.HorizontalSpacing, point.RowSpacing,
+                point.FormationPositionTolerance);
             int unitIndex = 0;
             foreach (EnemySpawnPoint.SpawnEntry entry in point.Enemies)
             {
                 if (entry == null || entry.enemyPrefab == null) continue;
                 for (int i = 0; i < entry.count; i++, unitIndex++)
-                    SpawnEnemy(point, entry.enemyPrefab, unitIndex);
+                    SpawnEnemy(point, entry.enemyPrefab, unitIndex, formation);
             }
+            if (unitIndex == 0) Destroy(formationObject);
         }
 
         if (aliveWaveEnemies.Count == 0)
@@ -110,7 +115,8 @@ public class EnemyWaveSpawner : MonoBehaviour
         }
     }
 
-    private void SpawnEnemy(EnemySpawnPoint point, GameObject prefab, int unitIndex)
+    private void SpawnEnemy(EnemySpawnPoint point, GameObject prefab, int unitIndex,
+        EnemyFormationCoordinator formation)
     {
         if (!point.TryGetSpawnPosition(unitIndex, out Vector3 navMeshPosition))
         {
@@ -129,6 +135,7 @@ public class EnemyWaveSpawner : MonoBehaviour
             return;
         }
 
+        formation.AddMember(instance);
         ai.ActivateAtSpawn(navMeshPosition);
         aliveWaveEnemies.Add(unit);
     }

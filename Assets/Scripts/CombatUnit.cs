@@ -15,12 +15,15 @@ public class CombatUnit : MonoBehaviour
     [Header("Shared Character Stats")]
     [Tooltip("Assign YuukaData, MikaData, AyaneData, etc. All scenes using the same asset share these base stats.")]
     public CharacterData characterData;
+    [Tooltip("When enabled, Character Data overwrites the Basic Stats below during Awake. Disable this on a scene character when you want its CombatUnit Inspector values to be authoritative.")]
+    [SerializeField] private bool applyCharacterDataOnAwake = true;
 
     [Header("Basic stats")]
     public float maxHealth = 100f, attackPower = 20f, defense = 5f, attackRange = 5f, attackSpeed = 1f;
     public float resistance = 5f, skillPointRegeneration = 7f, skillPointCapacity = 100f;
     public float durationRate = 1f, manipulationRate = 1f;
     [SerializeField] private float currentHealth, movementPoints;
+    [SerializeField] private float shieldPoints, shieldExpiresAt;
     [SerializeField] private bool isDead;
     [SerializeField] private List<ActiveStatusEffect> activeStatuses = new List<ActiveStatusEffect>();
     private int hitsTaken, statusVersion;
@@ -32,6 +35,7 @@ public class CombatUnit : MonoBehaviour
     public float CurrentHealth => currentHealth;
     public float HealthRatio => currentHealth / Mathf.Max(1f, maxHealth);
     public float MovementPoints => movementPoints;
+    public float ShieldPoints => shieldExpiresAt > Time.time ? shieldPoints : 0f;
     public bool IsDead => isDead;
     public bool IsBoss => isBoss;
     public float AttackPower => CalculateStat(Stat.Attack, attackPower);
@@ -43,7 +47,7 @@ public class CombatUnit : MonoBehaviour
 
     private void Awake()
     {
-        ApplyCharacterData();
+        if (applyCharacterDataOnAwake) ApplyCharacterData();
         currentHealth = maxHealth;
         movementPoints = skillPointCapacity;
         worldHUD = GetComponentInChildren<WorldUnitHUD>(true);
@@ -56,6 +60,7 @@ public class CombatUnit : MonoBehaviour
         movementPoints = Mathf.Min(skillPointCapacity, movementPoints + skillPointRegeneration * Time.deltaTime);
         modifiers.RemoveAll(m => m.expires <= Time.time);
         if (activeStatuses.RemoveAll(effect => effect.expiresAt <= Time.time) > 0) statusVersion++;
+        if (shieldPoints > 0f && shieldExpiresAt <= Time.time) shieldPoints = 0f;
     }
 
     private float CalculateStat(Stat stat, float basis)
@@ -129,6 +134,12 @@ public class CombatUnit : MonoBehaviour
         }
 
         float appliedDamage = rawDamage * (1f - protection);
+        if (ShieldPoints > 0f)
+        {
+            float absorbed = Mathf.Min(shieldPoints, appliedDamage);
+            shieldPoints -= absorbed;
+            appliedDamage -= absorbed;
+        }
         currentHealth -= appliedDamage;
         if (worldHUD != null) worldHUD.ShowDamage(appliedDamage);
         if (currentHealth <= 0f)
@@ -184,6 +195,15 @@ public class CombatUnit : MonoBehaviour
         durationRate = characterData.durationRate;
         manipulationRate = characterData.manipulationRate;
     }
+    public void ApplyShield(float amount, float duration)
+    {
+        if (isDead || amount <= 0f || duration <= 0f) return;
+        shieldPoints = Mathf.Max(shieldPoints, amount);
+        shieldExpiresAt = Mathf.Max(shieldExpiresAt, Time.time + duration);
+    }
+
+    public bool AppliesCharacterDataOnAwake => applyCharacterDataOnAwake;
+    public void SetApplyCharacterDataOnAwake(bool value) => applyCharacterDataOnAwake = value;
 
     public void ConfigureFromCharacterData(CharacterData data, bool boss)
     {
@@ -195,6 +215,7 @@ public class CombatUnit : MonoBehaviour
         currentHealth = maxHealth;
         movementPoints = skillPointCapacity;
         isDead = false;
+        shieldPoints = shieldExpiresAt = 0f;
         coverProtection = 0f;
         activeCoverPoint = null;
         hitsTaken = 0;
@@ -207,6 +228,7 @@ public class CombatUnit : MonoBehaviour
     {
         maxHealth = health; attackPower = power; defense = armor; isBoss = boss;
         currentHealth = maxHealth; movementPoints = skillPointCapacity; isDead = false;
+        shieldPoints = shieldExpiresAt = 0f;
         coverProtection = 0f; hitsTaken = 0; activeStatuses.Clear(); modifiers.Clear(); statusVersion++;
     }
 }

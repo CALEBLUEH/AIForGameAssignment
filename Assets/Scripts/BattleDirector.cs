@@ -16,13 +16,37 @@ public class BattleDirector : MonoBehaviour
     public Text bossNameText, moveCooldownText, skillCooldownText;
     public Image moveCooldownOverlay, skillCooldownOverlay;
     public SkillTargetingFeedback targetingFeedback;
+    [Header("Skill targeting presentation")]
+    [SerializeField] private SkillTargetingOverlayUI targetingOverlay;
+    [SerializeField] private Material targetOutlineMaterial;
+    [SerializeField] private LayerMask targetingGroundMask = ~0;
+    [Range(0.05f, 1f)] [SerializeField] private float skillTargetingTimeScale = 0.2f;
     public Button[] setupButtons, squadButtons;
     public Button leaderButton, startButton, moveButton, skillButton, healButton, coverButton, restartButton;
     public Button pauseButton, speedButton, autoButton, resumeButton, backButton;
+    [Header("Three-card skill queue")]
+    [Tooltip("Exactly three visible cards. When assigned, these replace the legacy Character/Heal/Cover button bindings.")]
+    [SerializeField] private SkillCardUI[] skillCards;
+    [SerializeField] private Sprite yuukaSkillIcon, ayaneSkillIcon, mikaSkillIcon, momoiSkillIcon, hinaSkillIcon;
+    [SerializeField] private Sprite healSkillIcon, buffSkillIcon, airstrikeSkillIcon, coverSkillIcon;
+    [Header("Basic skill effects")]
+    [SerializeField] private GameObject airstrikeMissilePrefab;
+    [SerializeField] private GameObject coverObstaclePrefab;
+    [Min(0f)] [SerializeField] private float basicHealAmount = 35f;
+    [Range(0f, 3f)] [SerializeField] private float basicBuffAttackMultiplier = 0.4f;
+    [Min(0.1f)] [SerializeField] private float basicBuffDuration = 10f;
+    [Min(0f)] [SerializeField] private float airstrikeDamage = 75f;
+    [Min(0.25f)] [SerializeField] private float airstrikeRadius = 3.5f;
+    [Min(0.1f)] [SerializeField] private float basicTargetSnapRadius = 1.8f;
+    [Min(1f)] [SerializeField] private float skillDropHeight = 10f;
+    [Min(0.1f)] [SerializeField] private float airstrikeDropDuration = 0.65f;
+    [Min(0.1f)] [SerializeField] private float coverDropDuration = 0.75f;
+    [Min(0.25f)] [SerializeField] private float coverIndicatorRadius = 1.5f;
+    [Min(1f)] [SerializeField] private float placedCoverHealth = 150f;
     [Header("Stage")]
     [Range(1, 3)] public int levelNumber = 1;
     public float universalCapacity = 100f, universalRegeneration = 8f;
-    public float healCost = 25f, coverCost = 35f;
+    public float healCost = 25f, buffCost = 30f, airstrikeCost = 45f, coverCost = 35f;
     public int waveTwoCount = 4;
     public float timedEnemyDelay = 18f;
     public bool startImmediately;
@@ -83,6 +107,8 @@ public class BattleDirector : MonoBehaviour
     private StagePhase phase = StagePhase.WaveOne;
     private enum TargetMode { None, Move, Skill }
     private TargetMode targetMode;
+    private int targetingStartedFrame = -1;
+    private SkillTargetHighlighter targetHighlighter;
     public bool IsPlaying => isPlaying;
     public float UniversalPoints => universalPoints;
     public bool AutoEnabled => autoEnabled;
@@ -96,9 +122,22 @@ public class BattleDirector : MonoBehaviour
     private GameObject selectedAttackRadiusObject;
     private GroundRadiusVisual selectedAttackRadiusVisual;
 
+    private enum QueuedSkillKind { Character, Heal, Buff, Airstrike, Cover }
+    private sealed class QueuedSkill
+    {
+        public QueuedSkillKind kind;
+        public AutoCombatAI owner;
+    }
+    private readonly List<QueuedSkill> skillQueue = new List<QueuedSkill>();
+    private QueuedSkill activeQueuedSkill;
+    private bool skillQueueTransitioning;
+    public bool UsesSkillQueue => skillCards != null && skillCards.Length == 3 &&
+        skillCards[0] != null && skillCards[1] != null && skillCards[2] != null;
+
     private void Awake()
     {
         Instance = this;
+        targetHighlighter = new SkillTargetHighlighter(targetOutlineMaterial);
         Time.timeScale = 1f;
         AudioSettingsUI.ApplySavedVolume();
         CombatUnit.UnitDied += OnUnitDied;
@@ -142,6 +181,7 @@ public class BattleDirector : MonoBehaviour
 
     private void OnDestroy()
     {
+        targetHighlighter?.Clear();
         CombatUnit.UnitDied -= OnUnitDied;
         if (Instance == this) Instance = null;
     }
@@ -157,9 +197,20 @@ public class BattleDirector : MonoBehaviour
         leaderButton.onClick.AddListener(CycleLeader);
         startButton.onClick.AddListener(StartBattle);
         moveButton.onClick.AddListener(() => BeginTargeting(TargetMode.Move));
-        skillButton.onClick.AddListener(UseCharacterSkill);
-        healButton.onClick.AddListener(UseHeal);
-        coverButton.onClick.AddListener(UseCover);
+        if (UsesSkillQueue)
+        {
+            for (int i = 0; i < skillCards.Length; i++)
+            {
+                int slot = i;
+                skillCards[i].Button.onClick.AddListener(() => UseQueuedSkill(slot));
+            }
+        }
+        else
+        {
+            skillButton.onClick.AddListener(UseCharacterSkill);
+            healButton.onClick.AddListener(UseHeal);
+            coverButton.onClick.AddListener(UseCover);
+        }
         if (pauseButton != null) pauseButton.onClick.AddListener(TogglePause);
         if (resumeButton != null) resumeButton.onClick.AddListener(TogglePause);
         if (backButton != null) backButton.onClick.AddListener(ReturnToPreparation);
@@ -231,6 +282,7 @@ public class BattleDirector : MonoBehaviour
         isPlaying = true;
         setupPanel.SetActive(false);
         battlePanel.SetActive(true);
+        InitializeSkillQueue();
         if (enemyWaveSpawner != null) enemyWaveSpawner.BeginBattle();
         RefreshBattle();
     }
@@ -238,7 +290,12 @@ public class BattleDirector : MonoBehaviour
     private void OnUnitDied(CombatUnit deadUnit)
     {
         if (deadUnit != null && deadUnit.team == CombatUnit.CombatTeam.Player &&
-            deployedUnitIds.Contains(deadUnit.GetInstanceID())) playerDeaths++;
+            deployedUnitIds.Contains(deadUnit.GetInstanceID()))
+        {
+            playerDeaths++;
+            skillQueue.RemoveAll(entry => entry.owner != null && entry.owner.Unit == deadUnit);
+            RefreshSkillQueue();
+        }
     }
 
     private void Update()
@@ -287,9 +344,11 @@ public class BattleDirector : MonoBehaviour
             return;
         }
         UpdateTargetPointer();
-        if (Input.GetMouseButtonDown(0) && targetMode != TargetMode.None &&
-            !IsPointerOverInteractiveUI())
-            HandleWorldClick();
+        if (targetMode == TargetMode.Move && Input.GetMouseButtonDown(0) && !IsPointerOverInteractiveUI())
+            HandleWorldRelease();
+        else if (targetMode == TargetMode.Skill && Input.GetMouseButtonUp(0) &&
+            Time.frameCount > targetingStartedFrame && !IsPointerOverInteractiveUI())
+            HandleWorldRelease();
         if (targetMode != TargetMode.None && Input.GetKeyDown(KeyCode.Escape)) ExitTargeting();
         RefreshBattle();
     }
@@ -455,19 +514,183 @@ public class BattleDirector : MonoBehaviour
         BeginTargeting(TargetMode.Skill);
     }
 
+    private void InitializeSkillQueue()
+    {
+        if (!UsesSkillQueue) return;
+        skillQueue.Clear();
+        foreach (int index in deployedIndices)
+        {
+            if (!IsUsableSquadMember(index)) continue;
+            skillQueue.Add(new QueuedSkill { kind = QueuedSkillKind.Character, owner = squad[index] });
+        }
+        skillQueue.Add(new QueuedSkill { kind = QueuedSkillKind.Heal });
+        skillQueue.Add(new QueuedSkill { kind = QueuedSkillKind.Buff });
+        skillQueue.Add(new QueuedSkill { kind = QueuedSkillKind.Airstrike });
+        skillQueue.Add(new QueuedSkill { kind = QueuedSkillKind.Cover });
+
+        for (int i = skillQueue.Count - 1; i > 0; i--)
+        {
+            int swapIndex = UnityEngine.Random.Range(0, i + 1);
+            QueuedSkill temporary = skillQueue[i];
+            skillQueue[i] = skillQueue[swapIndex];
+            skillQueue[swapIndex] = temporary;
+        }
+        skillQueueTransitioning = false;
+        RefreshSkillQueue();
+    }
+
+    private void UseQueuedSkill(int slot)
+    {
+        if (!UsesSkillQueue || skillQueueTransitioning || slot < 0 || slot >= 3 || slot >= skillQueue.Count) return;
+        QueuedSkill entry = skillQueue[slot];
+        if (targetMode == TargetMode.Skill && activeQueuedSkill == entry)
+        {
+            ExitTargeting();
+            return;
+        }
+        if (targetMode != TargetMode.None) ExitTargeting();
+        switch (entry.kind)
+        {
+            case QueuedSkillKind.Character:
+                if (entry.owner == null || entry.owner.Unit == null || entry.owner.Unit.IsDead) return;
+                int ownerIndex = squad.IndexOf(entry.owner);
+                if (ownerIndex < 0) return;
+                SelectMember(ownerIndex);
+                activeQueuedSkill = entry;
+                BeginTargeting(TargetMode.Skill);
+                break;
+            case QueuedSkillKind.Heal:
+            case QueuedSkillKind.Buff:
+            case QueuedSkillKind.Airstrike:
+            case QueuedSkillKind.Cover:
+                activeQueuedSkill = entry;
+                BeginTargeting(TargetMode.Skill);
+                break;
+        }
+    }
+
+    public bool CanUseQueuedCharacterSkill(AutoCombatAI owner)
+    {
+        if (!UsesSkillQueue) return true;
+        if (skillQueueTransitioning || owner == null) return false;
+        int visibleCount = Mathf.Min(3, skillQueue.Count);
+        for (int i = 0; i < visibleCount; i++)
+            if (skillQueue[i].kind == QueuedSkillKind.Character && skillQueue[i].owner == owner) return true;
+        return false;
+    }
+
+    public void NotifyCharacterSkillUsed(AutoCombatAI owner)
+    {
+        if (!UsesSkillQueue || owner == null) return;
+        QueuedSkill entry = skillQueue.Find(candidate =>
+            candidate.kind == QueuedSkillKind.Character && candidate.owner == owner);
+        if (entry != null) ConsumeQueuedSkill(entry);
+    }
+
+    private void ConsumeQueuedSkill(QueuedSkill entry)
+    {
+        if (entry == null || skillQueueTransitioning) return;
+        int index = skillQueue.IndexOf(entry);
+        if (index < 0) return;
+        skillQueueTransitioning = true;
+        System.Action rotate = () =>
+        {
+            if (skillQueue.Remove(entry)) skillQueue.Add(entry);
+            skillQueueTransitioning = false;
+            RefreshSkillQueue();
+        };
+        if (index < 3 && index < skillCards.Length) skillCards[index].PlayUsed(rotate);
+        else rotate();
+    }
+
+    private void RefreshSkillQueue()
+    {
+        if (!UsesSkillQueue || skillQueueTransitioning) return;
+        for (int i = 0; i < skillCards.Length; i++)
+        {
+            if (i >= skillQueue.Count)
+            {
+                skillCards[i].gameObject.SetActive(false);
+                continue;
+            }
+            skillCards[i].gameObject.SetActive(true);
+            QueuedSkill entry = skillQueue[i];
+            bool usable = IsQueuedSkillUsable(entry);
+            skillCards[i].Bind(IconFor(entry), NameFor(entry), CostFor(entry), usable);
+        }
+    }
+
+    private bool IsQueuedSkillUsable(QueuedSkill entry)
+    {
+        if (!isPlaying || entry == null) return false;
+        if (entry.kind == QueuedSkillKind.Heal) return Selected != null && universalPoints >= healCost;
+        if (entry.kind == QueuedSkillKind.Buff) return Selected != null && universalPoints >= buffCost;
+        if (entry.kind == QueuedSkillKind.Airstrike) return Selected != null && universalPoints >= airstrikeCost;
+        if (entry.kind == QueuedSkillKind.Cover) return Selected != null && universalPoints >= coverCost;
+        return entry.owner != null && entry.owner.Unit != null && !entry.owner.Unit.IsDead &&
+            entry.owner.CharacterCooldownRemaining <= 0f && universalPoints >= entry.owner.characterSkillCost;
+    }
+
+    private float CostFor(QueuedSkill entry)
+    {
+        if (entry.kind == QueuedSkillKind.Heal) return healCost;
+        if (entry.kind == QueuedSkillKind.Buff) return buffCost;
+        if (entry.kind == QueuedSkillKind.Airstrike) return airstrikeCost;
+        if (entry.kind == QueuedSkillKind.Cover) return coverCost;
+        return entry.owner == null ? 0f : entry.owner.characterSkillCost;
+    }
+
+    private static string NameFor(QueuedSkill entry)
+    {
+        if (entry.kind == QueuedSkillKind.Heal) return "HEAL";
+        if (entry.kind == QueuedSkillKind.Buff) return "BUFF";
+        if (entry.kind == QueuedSkillKind.Airstrike) return "AIRSTRIKE";
+        if (entry.kind == QueuedSkillKind.Cover) return "COVER";
+        return entry.owner == null ? "SKILL" : entry.owner.name.ToUpperInvariant();
+    }
+
+    private Sprite IconFor(QueuedSkill entry)
+    {
+        if (entry.kind == QueuedSkillKind.Heal) return healSkillIcon;
+        if (entry.kind == QueuedSkillKind.Buff) return buffSkillIcon;
+        if (entry.kind == QueuedSkillKind.Airstrike) return airstrikeSkillIcon;
+        if (entry.kind == QueuedSkillKind.Cover) return coverSkillIcon;
+        if (entry.owner == null) return null;
+        switch (entry.owner.role)
+        {
+            case AutoCombatAI.CombatRole.YuukaTank: return yuukaSkillIcon;
+            case AutoCombatAI.CombatRole.AyaneHealer: return ayaneSkillIcon;
+            case AutoCombatAI.CombatRole.MikaSingleTarget: return mikaSkillIcon;
+            case AutoCombatAI.CombatRole.MomoiLowCostAOE: return momoiSkillIcon;
+            case AutoCombatAI.CombatRole.HinaHighCostAOE: return hinaSkillIcon;
+            default: return null;
+        }
+    }
+
     private void UseHeal()
     {
+        TryUseHeal();
+    }
+
+    private bool TryUseHeal()
+    {
         ExitTargeting();
-        if (Selected == null || Selected.Unit.IsDead || !TrySpendUniversal(healCost)) return;
+        if (Selected == null || Selected.Unit.IsDead || !TrySpendUniversal(healCost)) return false;
         Selected.Unit.Heal(35f);
         if (targetingFeedback != null)
             targetingFeedback.PlayFeedback(Selected.transform.position, new Color(0.2f, 1f, 0.55f));
+        return true;
     }
 
     private void UseCover()
     {
+        TryUseCover();
+    }
+
+    private bool TryUseCover()
+    {
         ExitTargeting();
-        if (Selected == null || Selected.Unit.IsDead || !TrySpendUniversal(coverCost)) return;
+        if (Selected == null || Selected.Unit.IsDead || !TrySpendUniversal(coverCost)) return false;
 
         Vector3 forward = Selected.transform.forward;
         forward.y = 0f;
@@ -490,6 +713,7 @@ public class BattleDirector : MonoBehaviour
         // The skill-created wall has its own HP. Damage prevented by its protection
         // is transferred to this object until it breaks.
         block.AddComponent<DestructibleCover>();
+        TacticalCoverObstacle coverGroup = block.AddComponent<TacticalCoverObstacle>();
 
         // IMPORTANT: the old skill only spawned a NavMesh obstacle.
         // AutoCombatAI therefore saw it only as something to walk around.
@@ -507,21 +731,20 @@ public class BattleDirector : MonoBehaviour
             pointObject.transform.position = pointPosition;
 
             CoverPoint point = pointObject.AddComponent<CoverPoint>();
-            point.coverCollider = block.GetComponent<Collider>();
-            point.protection = 0.35f;
-            point.occupancyRadius = 0.45f;
+            point.Configure(block.GetComponent<Collider>(), coverGroup, 0.35f, 0.45f);
         }
 
         if (targetingFeedback != null)
             targetingFeedback.PlayFeedback(position, new Color(0.25f, 0.75f, 1f));
+        return true;
     }
 
-    private void HandleWorldClick()
+    private void HandleWorldRelease()
     {
         if (Selected == null || Selected.Unit.IsDead) { ExitTargeting(); return; }
         if (Camera.main == null) { ExitTargeting(); return; }
         Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
-        if (!TryGetGroundPoint(ray, out Vector3 pointer)) { ExitTargeting(); return; }
+        if (!TryGetGroundPoint(ray, out Vector3 pointer)) return;
         ResolveTargetAt(pointer);
     }
 
@@ -537,27 +760,157 @@ public class BattleDirector : MonoBehaviour
         if (targetMode == TargetMode.Move) used = Selected.TryMovementSkill(pointer);
         else if (targetMode == TargetMode.Skill)
         {
-            bool selfSkill = Selected.characterSkillKind == AutoCombatAI.CharacterSkillKind.PowerUp ||
-                Selected.characterSkillKind == AutoCombatAI.CharacterSkillKind.Defensive;
-            CombatUnit target = selfSkill
-                ? null : FindSkillTarget(pointer);
-            used = Selected.TryCharacterSkill(target);
-            if (target != null) feedbackPosition = target.transform.position;
+            if (activeQueuedSkill != null && activeQueuedSkill.kind != QueuedSkillKind.Character)
+            {
+                QueuedSkill completedSkill = activeQueuedSkill;
+                used = TryResolveBasicSkill(completedSkill.kind, pointer, out feedbackPosition);
+                if (used) ConsumeQueuedSkill(completedSkill);
+            }
+            else
+            {
+                CombatUnit target = Selected.role == AutoCombatAI.CombatRole.MikaSingleTarget
+                    ? FindSkillTarget(pointer) : null;
+                used = Selected.TryCharacterSkillAt(pointer, target);
+                if (target != null) feedbackPosition = target.transform.position;
+            }
         }
         if (used && targetingFeedback != null)
             targetingFeedback.PlayFeedback(feedbackPosition, new Color(1f, 0.65f, 0.1f));
-        ExitTargeting();
+        if (used || targetMode == TargetMode.Move) ExitTargeting();
         return used;
+    }
+
+    private bool TryResolveBasicSkill(QueuedSkillKind kind, Vector3 pointer, out Vector3 feedbackPosition)
+    {
+        feedbackPosition = pointer;
+        if (kind == QueuedSkillKind.Heal || kind == QueuedSkillKind.Buff)
+        {
+            CombatUnit ally = FindAllyTarget(pointer);
+            if (ally == null) return false;
+            float cost = kind == QueuedSkillKind.Heal ? healCost : buffCost;
+            if (!TrySpendUniversal(cost)) return false;
+            feedbackPosition = ally.transform.position;
+            if (kind == QueuedSkillKind.Heal)
+            {
+                ally.Heal(basicHealAmount);
+                SkillVfx.SpawnBurst(ally.transform.position + Vector3.up * 0.75f,
+                    new Color(0.2f, 1f, 0.45f), 0.22f, 20, 0.65f);
+            }
+            else
+            {
+                ally.AddTimedModifier(CombatUnit.Stat.Attack, 0f, basicBuffAttackMultiplier, basicBuffDuration);
+                SkillVfx.SpawnAura(ally.transform, new Color(1f, 0.82f, 0.12f), basicBuffDuration, 0.7f);
+            }
+            return true;
+        }
+
+        if (kind == QueuedSkillKind.Airstrike)
+        {
+            if (!TrySpendUniversal(airstrikeCost)) return false;
+            Vector3 landingPoint = pointer;
+            SkillVfx.DropModel(airstrikeMissilePrefab, landingPoint,
+                Vector3.up * skillDropHeight - Vector3.right * 4f,
+                airstrikeDropDuration, 1f, true, landed =>
+                {
+                    SkillVfx.SpawnBurst(landingPoint + Vector3.up * 0.25f,
+                        new Color(1f, 0.42f, 0.12f), 0.75f, 55, 1.1f);
+                    foreach (CombatUnit enemy in FindObjectsByType<CombatUnit>(FindObjectsSortMode.None))
+                        if (!enemy.IsDead && enemy.team == CombatUnit.CombatTeam.Enemy &&
+                            FlatDistance(landingPoint, enemy.transform.position) <= airstrikeRadius)
+                            enemy.TakeDamage(airstrikeDamage, landingPoint);
+                });
+            return true;
+        }
+
+        if (kind == QueuedSkillKind.Cover)
+        {
+            if (!TrySpendUniversal(coverCost)) return false;
+            Vector3 facing = Selected.transform.position - pointer;
+            facing.y = 0f;
+            if (facing.sqrMagnitude < 0.01f) facing = Vector3.forward;
+            Quaternion rotation = Quaternion.LookRotation(facing.normalized);
+            SkillVfx.DropModel(coverObstaclePrefab, pointer, Vector3.up * skillDropHeight,
+                coverDropDuration, 1f, false, landed => ConfigurePlacedCover(landed, pointer, rotation));
+            return true;
+        }
+        return false;
+    }
+
+    private CombatUnit FindAllyTarget(Vector3 pointer)
+    {
+        CombatUnit best = null;
+        float bestDistance = float.PositiveInfinity;
+        foreach (CombatUnit candidate in FindObjectsByType<CombatUnit>(FindObjectsSortMode.None))
+        {
+            if (candidate.IsDead || candidate.team != CombatUnit.CombatTeam.Player) continue;
+            float distance = FlatDistance(pointer, candidate.transform.position);
+            if (distance >= bestDistance) continue;
+            best = candidate;
+            bestDistance = distance;
+        }
+        return bestDistance <= basicTargetSnapRadius ? best : null;
+    }
+
+    private void ConfigurePlacedCover(GameObject cover, Vector3 position, Quaternion rotation)
+    {
+        if (cover == null) return;
+        cover.name = "Placed Cover";
+        cover.transform.SetPositionAndRotation(position, rotation);
+        cover.layer = 8;
+        foreach (Transform child in cover.GetComponentsInChildren<Transform>(true)) child.gameObject.layer = 8;
+
+        Collider physicalCollider = cover.GetComponentInChildren<Collider>(true);
+        if (physicalCollider == null)
+        {
+            Bounds bounds = CalculateRendererBounds(cover);
+            BoxCollider box = cover.AddComponent<BoxCollider>();
+            box.center = cover.transform.InverseTransformPoint(bounds.center);
+            Vector3 scale = cover.transform.lossyScale;
+            box.size = new Vector3(bounds.size.x / Mathf.Max(0.001f, Mathf.Abs(scale.x)),
+                bounds.size.y / Mathf.Max(0.001f, Mathf.Abs(scale.y)),
+                bounds.size.z / Mathf.Max(0.001f, Mathf.Abs(scale.z)));
+            physicalCollider = box;
+        }
+        foreach (Collider collider in cover.GetComponentsInChildren<Collider>(true)) collider.enabled = true;
+
+        NavMeshObstacle navObstacle = cover.GetComponent<NavMeshObstacle>();
+        if (navObstacle == null) navObstacle = cover.AddComponent<NavMeshObstacle>();
+        navObstacle.carving = true;
+        DestructibleCover destructible = cover.GetComponent<DestructibleCover>();
+        if (destructible == null) destructible = cover.AddComponent<DestructibleCover>();
+        destructible.Configure(placedCoverHealth);
+        TacticalCoverObstacle group = cover.GetComponent<TacticalCoverObstacle>();
+        if (group == null) group = cover.AddComponent<TacticalCoverObstacle>();
+
+        Vector3 playerSide = position + rotation * Vector3.back * 0.85f;
+        Vector3 right = rotation * Vector3.right;
+        for (int i = -1; i <= 1; i++)
+        {
+            GameObject pointObject = new GameObject("Placed Cover Point " + (i + 2));
+            pointObject.transform.SetParent(cover.transform, true);
+            pointObject.transform.position = playerSide + right * (i * 0.75f);
+            CoverPoint point = pointObject.AddComponent<CoverPoint>();
+            point.Configure(physicalCollider, group, 0.35f, 0.45f);
+        }
+        SkillVfx.SpawnBurst(position + Vector3.up * 0.2f, new Color(0.3f, 0.75f, 1f), 0.3f, 28, 0.75f);
+    }
+
+    private static Bounds CalculateRendererBounds(GameObject root)
+    {
+        Renderer[] renderers = root.GetComponentsInChildren<Renderer>(true);
+        if (renderers.Length == 0) return new Bounds(root.transform.position, new Vector3(2.5f, 1.8f, 0.7f));
+        Bounds bounds = renderers[0].bounds;
+        for (int i = 1; i < renderers.Length; i++) bounds.Encapsulate(renderers[i].bounds);
+        return bounds;
     }
 
     private CombatUnit FindSkillTarget(Vector3 pointer)
     {
         CombatUnit best = null;
         float bestPointerDistance = float.PositiveInfinity;
-        bool wantsAlly = Selected.characterSkillKind == AutoCombatAI.CharacterSkillKind.Heal;
         foreach (CombatUnit candidate in FindObjectsByType<CombatUnit>(FindObjectsSortMode.None))
         {
-            if (candidate.IsDead || (candidate.team == Selected.Unit.team) != wantsAlly ||
+            if (candidate.IsDead || candidate.team == Selected.Unit.team ||
                 FlatDistance(Selected.transform.position, candidate.transform.position) > Selected.skillRange) continue;
             float pointerDistance = FlatDistance(pointer, candidate.transform.position);
             if (pointerDistance < bestPointerDistance)
@@ -566,15 +919,26 @@ public class BattleDirector : MonoBehaviour
                 bestPointerDistance = pointerDistance;
             }
         }
-        return best;
+        return bestPointerDistance <= Selected.targetSnapRadius ? best : null;
     }
 
-    private static bool TryGetGroundPoint(Ray ray, out Vector3 point)
+    private bool TryGetGroundPoint(Ray ray, out Vector3 point)
     {
-        var ground = new Plane(Vector3.up, Vector3.zero);
-        if (ground.Raycast(ray, out float distance))
+        RaycastHit[] hits = Physics.RaycastAll(ray, 1000f, targetingGroundMask, QueryTriggerInteraction.Ignore);
+        System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
+        foreach (RaycastHit hit in hits)
         {
-            point = ray.GetPoint(distance);
+            if (NavMesh.SamplePosition(hit.point, out NavMeshHit navHit, 5f, NavMesh.AllAreas))
+            {
+                point = navHit.position;
+                return true;
+            }
+        }
+        var fallback = new Plane(Vector3.up, Vector3.zero);
+        if (fallback.Raycast(ray, out float distance) &&
+            NavMesh.SamplePosition(ray.GetPoint(distance), out NavMeshHit fallbackHit, 10f, NavMesh.AllAreas))
+        {
+            point = fallbackHit.position;
             return true;
         }
         point = default;
@@ -585,17 +949,35 @@ public class BattleDirector : MonoBehaviour
     {
         if (Selected == null || Selected.Unit.IsDead) return;
         if (mode == TargetMode.Move && Selected.MovementCooldownRemaining > 0f) return;
-        if (mode == TargetMode.Skill && Selected.CharacterCooldownRemaining > 0f) return;
+        bool targetsBasicSkill = mode == TargetMode.Skill && activeQueuedSkill != null &&
+            activeQueuedSkill.kind != QueuedSkillKind.Character;
+        if (mode == TargetMode.Skill && !targetsBasicSkill && Selected.CharacterCooldownRemaining > 0f) return;
+        if (targetsBasicSkill && !IsQueuedSkillUsable(activeQueuedSkill)) return;
         targetMode = mode;
-        Time.timeScale = 0.12f;
+        targetingStartedFrame = Time.frameCount;
+        Time.timeScale = mode == TargetMode.Skill ? skillTargetingTimeScale : 0.12f;
+        if (mode == TargetMode.Skill && targetingOverlay != null)
+        {
+            if (targetsBasicSkill) targetingOverlay.Show(NameFor(activeQueuedSkill), BasicSkillDescription(activeQueuedSkill.kind));
+            else targetingOverlay.Show(Selected.name.ToUpperInvariant() + " SKILL", Selected.SkillDescription);
+        }
         if (targetingFeedback == null) return;
         if (mode == TargetMode.Move) targetingFeedback.ShowArrow(Selected.transform, Selected.movementRange);
+        else if (!targetsBasicSkill) targetingFeedback.ShowCharacterSkill(Selected);
         else
         {
-            bool ranged = Selected.characterSkillKind != AutoCombatAI.CharacterSkillKind.PowerUp &&
-                Selected.characterSkillKind != AutoCombatAI.CharacterSkillKind.Defensive;
-            targetingFeedback.ShowRange(Selected.transform, ranged ? Selected.skillRange : 2.2f, ranged);
+            float indicatorRadius = activeQueuedSkill.kind == QueuedSkillKind.Airstrike ? airstrikeRadius :
+                activeQueuedSkill.kind == QueuedSkillKind.Cover ? coverIndicatorRadius : basicTargetSnapRadius * 0.55f;
+            targetingFeedback.ShowWorldCircle(Selected.NavMeshWorldPosition, indicatorRadius);
         }
+    }
+
+    private static string BasicSkillDescription(QueuedSkillKind kind)
+    {
+        if (kind == QueuedSkillKind.Heal) return "Drag onto an ally to restore health.";
+        if (kind == QueuedSkillKind.Buff) return "Drag onto an ally to increase attack by 40% for 10 seconds.";
+        if (kind == QueuedSkillKind.Airstrike) return "Choose an area for a damaging missile strike.";
+        return "Choose an area to drop a usable cover obstacle.";
     }
 
     private void UpdateTargetPointer()
@@ -603,13 +985,69 @@ public class BattleDirector : MonoBehaviour
         if (targetMode == TargetMode.None || targetingFeedback == null || Camera.main == null) return;
         Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
         if (TryGetGroundPoint(ray, out Vector3 pointer)) targetingFeedback.SetPointer(pointer);
+        if (targetMode == TargetMode.Skill) RefreshSkillTargetHighlights();
     }
 
     private void ExitTargeting()
     {
         targetMode = TargetMode.None;
+        activeQueuedSkill = null;
         if (targetingFeedback != null) targetingFeedback.Hide();
+        if (targetingOverlay != null) targetingOverlay.Hide();
+        targetHighlighter?.Clear();
         Time.timeScale = paused ? 0f : speedLevel;
+    }
+
+    private void RefreshSkillTargetHighlights()
+    {
+        if (Selected == null || targetingFeedback == null || targetHighlighter == null) return;
+        var affected = new List<CombatUnit>();
+        Vector3 pointer = targetingFeedback.Pointer;
+        if (activeQueuedSkill != null && activeQueuedSkill.kind != QueuedSkillKind.Character)
+        {
+            if (activeQueuedSkill.kind == QueuedSkillKind.Heal || activeQueuedSkill.kind == QueuedSkillKind.Buff)
+            {
+                CombatUnit ally = FindAllyTarget(pointer);
+                if (ally != null) affected.Add(ally);
+            }
+            else if (activeQueuedSkill.kind == QueuedSkillKind.Airstrike)
+            {
+                foreach (CombatUnit candidate in FindObjectsByType<CombatUnit>(FindObjectsSortMode.None))
+                    if (!candidate.IsDead && candidate.team == CombatUnit.CombatTeam.Enemy &&
+                        FlatDistance(pointer, candidate.transform.position) <= airstrikeRadius)
+                        affected.Add(candidate);
+            }
+            targetHighlighter.Set(affected);
+            if (targetingOverlay != null) targetingOverlay.SetHighlightHoles(affected, Camera.main);
+            return;
+        }
+        switch (Selected.role)
+        {
+            case AutoCombatAI.CombatRole.YuukaTank:
+                affected.Add(Selected.Unit);
+                break;
+            case AutoCombatAI.CombatRole.MikaSingleTarget:
+                CombatUnit target = FindSkillTarget(pointer);
+                if (target != null) affected.Add(target);
+                break;
+            case AutoCombatAI.CombatRole.AyaneHealer:
+                foreach (CombatUnit candidate in FindObjectsByType<CombatUnit>(FindObjectsSortMode.None))
+                    if (!candidate.IsDead && candidate.team == Selected.Unit.team &&
+                        FlatDistance(pointer, candidate.transform.position) <= Selected.aoeRadius)
+                        affected.Add(candidate);
+                break;
+            case AutoCombatAI.CombatRole.MomoiLowCostAOE:
+            case AutoCombatAI.CombatRole.HinaHighCostAOE:
+                Vector3 origin = Selected.NavMeshWorldPosition;
+                Vector3 direction = pointer - origin;
+                foreach (CombatUnit candidate in FindObjectsByType<CombatUnit>(FindObjectsSortMode.None))
+                    if (!candidate.IsDead && candidate.team != Selected.Unit.team &&
+                        Selected.IsInsideCone(origin, direction, candidate.transform.position))
+                        affected.Add(candidate);
+                break;
+        }
+        targetHighlighter.Set(affected);
+        if (targetingOverlay != null) targetingOverlay.SetHighlightHoles(affected, Camera.main);
     }
 
     private static float FlatDistance(Vector3 a, Vector3 b)
@@ -668,9 +1106,11 @@ public class BattleDirector : MonoBehaviour
                     selectedMember.characterSkillKind == AutoCombatAI.CharacterSkillKind.PowerUp ? "Click to activate" : "Click near a target"));
             RefreshCooldown(moveCooldownOverlay, moveCooldownText, moveButton,
                 selectedMember.MovementCooldownRemaining, unit.MovementPoints >= selectedMember.movementCost);
-            RefreshCooldown(skillCooldownOverlay, skillCooldownText, skillButton,
-                selectedMember.CharacterCooldownRemaining, universalPoints >= selectedMember.characterSkillCost);
+            if (!UsesSkillQueue)
+                RefreshCooldown(skillCooldownOverlay, skillCooldownText, skillButton,
+                    selectedMember.CharacterCooldownRemaining, universalPoints >= selectedMember.characterSkillCost);
         }
+        RefreshSkillQueue();
         bool showBoss = boss != null && !boss.IsDead && phase == StagePhase.Boss;
         if (bossHealthPanel != null) bossHealthPanel.SetActive(showBoss);
         if (showBoss && bossHealthSlider != null)

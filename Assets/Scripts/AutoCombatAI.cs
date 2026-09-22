@@ -1,3 +1,4 @@
+using System.Collections;
 using UnityEngine;
 using UnityEngine.AI;
 
@@ -38,6 +39,23 @@ public class AutoCombatAI : MonoBehaviour
     [Header("Character skill balance")]
     public float characterSkillCost = 40f, characterSkillCooldown = 10f, skillRange = 6f;
     public float skillPowerMultiplier = 2.5f, skillHealAmount = 35f, aoeRadius = 4f;
+    [TextArea(2, 4)] public string skillDescription;
+    [Tooltip("Maximum pointer distance from Mika's enemy target.")]
+    [Min(0.1f)] public float targetSnapRadius = 2.2f;
+    [Range(5f, 170f)] public float coneAngle = 55f;
+    [Min(1)] public int damageTickCount = 6;
+    [Min(0f)] public float damageTickDuration = 2f;
+    [Min(0f)] public float shieldAmount = 80f;
+    [Min(0.1f)] public float shieldDuration = 8f;
+    [Min(0.1f)] public float shieldVisualRadius = 1.35f;
+    public Material shieldMaterial;
+    [Header("Character skill timing and effects")]
+    [Min(0f)] public float skillWindup = 0.45f;
+    [Min(0f)] public float skillRecovery = 0.35f;
+    [Min(1f)] public float skillProjectileSpeed = 28f;
+    [Min(0.1f)] public float skillDropHeight = 9f;
+    [Min(0.05f)] public float skillDropDuration = 0.7f;
+    public GameObject medKitPrefab;
     public StatusEffectSpec primaryEffect;
     public StatusEffectSpec secondaryEffect;
     [Header("Auto decision thresholds")]
@@ -74,10 +92,11 @@ public class AutoCombatAI : MonoBehaviour
     private int corner, actionIndex, enemyAbilityCycle;
     private float nextAttack, nextSearch, nextPath, nextAutoDecision;
     private float movementReadyAt, characterSkillReadyAt, enemyAbilityReadyAt;
-    private bool returning, skillMoving;
+    private bool returning, skillMoving, skillCasting;
     private Vector3 skillDestination;
     private float skillSpeed;
     private CoverPoint coverPoint;
+    private EnemyFormationMember formationMember;
     private CoverPoint rejectedCoverPoint;
     private float rejectedCoverUntil;
     private Vector3 losRepositionPoint;
@@ -88,8 +107,12 @@ public class AutoCombatAI : MonoBehaviour
     private float runtimeGroundOffset;
     public string CurrentState => currentState;
     public CombatUnit Unit => unit;
+    public CombatUnit CurrentTarget => currentTarget;
+    public Vector3 NavMeshWorldPosition => NavMeshProbe(transform.position);
     public float MovementCooldownRemaining => Mathf.Max(0f, movementReadyAt - Time.time);
     public float CharacterCooldownRemaining => Mathf.Max(0f, characterSkillReadyAt - Time.time);
+    public bool IsCastingSkill => skillCasting;
+    public string SkillDescription => string.IsNullOrWhiteSpace(skillDescription) ? DefaultSkillDescription() : skillDescription;
 
     private void Awake()
     {
@@ -143,6 +166,11 @@ public class AutoCombatAI : MonoBehaviour
     {
         if (unit.IsDead) { currentState = "Down"; return; }
         if (BattleDirector.Instance != null && !BattleDirector.Instance.IsPlaying) return;
+        if (skillCasting)
+        {
+            ClearPath();
+            return;
+        }
         if (unit.team == CombatUnit.CombatTeam.Enemy && !UpdateEnemyEngagement()) return;
         if (skillMoving)
         {
@@ -183,10 +211,10 @@ public class AutoCombatAI : MonoBehaviour
             if (unit.team == CombatUnit.CombatTeam.Enemy && TryEnemyAbility()) return;
         }
 
-        // Cover is normal combat positioning, so it works with Auto ON or OFF.
-        // Frontline/low-cover units are allowed to keep advancing instead of hiding with the backline.
-        if (unit.team == CombatUnit.CombatTeam.Player && ShouldUseCover() && HandleCover()) return;
-        if (unit.team == CombatUnit.CombatTeam.Player && !ShouldUseCover() && coverPoint != null) ReleaseCover();
+        // Cover is normal combat positioning for either team and has higher priority
+        // than enemy formation movement. Frontline/low-cover units may still advance.
+        if (ShouldUseCover() && HandleCover()) return;
+        if (!ShouldUseCover() && coverPoint != null) ReleaseCover();
         bool inRange = Distance(transform.position, currentTarget.transform.position) <= unit.AttackRange;
         bool hasSight = HasSight(currentTarget);
         if (inRange && hasSight)
@@ -227,8 +255,16 @@ public class AutoCombatAI : MonoBehaviour
             }
             else
             {
-                currentState = inRange ? "Repositioning for line of sight" : "Pursuing";
-                Navigate(currentTarget.transform.position, hasSight ? unit.AttackRange * 0.8f : 0.2f);
+                Vector3 destination = GetNavigationPosition(currentTarget);
+                float stopDistance = hasSight ? unit.AttackRange * 0.8f : 0.2f;
+                if (unit.team == CombatUnit.CombatTeam.Enemy && TryGetFormationDestination(out Vector3 formationDestination))
+                {
+                    destination = formationDestination;
+                    stopDistance = formationMember.PositionTolerance;
+                    currentState = "Holding formation";
+                }
+                else currentState = inRange ? "Repositioning for line of sight" : "Pursuing";
+                Navigate(destination, stopDistance);
             }
             Move(movementSpeed, true);
         }
@@ -281,21 +317,26 @@ public class AutoCombatAI : MonoBehaviour
     {
         if (CharacterCooldownRemaining <= 0f)
         {
-            CombatUnit skillTarget = FindAutoSkillTarget();
-            bool shouldUse = false;
-            switch (role)
+            bool queueAllowsSkill = BattleDirector.Instance == null ||
+                BattleDirector.Instance.CanUseQueuedCharacterSkill(this);
+            if (queueAllowsSkill)
             {
-                case CombatRole.YuukaTank:
-                    shouldUse = unit.HealthRatio <= defensiveHealthThreshold || CountInjuredAllies(defensiveHealthThreshold) >= 2;
-                    break;
-                case CombatRole.AyaneHealer: shouldUse = skillTarget != null && skillTarget.HealthRatio < healingThreshold; break;
-                case CombatRole.MikaSingleTarget: shouldUse = skillTarget != null; break;
-                case CombatRole.MomoiLowCostAOE: shouldUse = skillTarget != null && CountEnemiesNear(skillTarget.transform.position, aoeRadius) >= aoeMinimumEnemyCount; break;
-                case CombatRole.HinaHighCostAOE:
-                    shouldUse = skillTarget != null && (CountEnemiesNear(skillTarget.transform.position, aoeRadius) >= expensiveAoeMinimumEnemyCount || skillTarget.IsBoss);
-                    break;
+                CombatUnit skillTarget = FindAutoSkillTarget();
+                bool shouldUse = false;
+                switch (role)
+                {
+                    case CombatRole.YuukaTank:
+                        shouldUse = unit.HealthRatio <= defensiveHealthThreshold || CountInjuredAllies(defensiveHealthThreshold) >= 2;
+                        break;
+                    case CombatRole.AyaneHealer: shouldUse = skillTarget != null && skillTarget.HealthRatio < healingThreshold; break;
+                    case CombatRole.MikaSingleTarget: shouldUse = skillTarget != null; break;
+                    case CombatRole.MomoiLowCostAOE: shouldUse = skillTarget != null && CountEnemiesNear(skillTarget.transform.position, aoeRadius) >= aoeMinimumEnemyCount; break;
+                    case CombatRole.HinaHighCostAOE:
+                        shouldUse = skillTarget != null && (CountEnemiesNear(skillTarget.transform.position, aoeRadius) >= expensiveAoeMinimumEnemyCount || skillTarget.IsBoss);
+                        break;
+                }
+                if (shouldUse && TryCharacterSkill(skillTarget)) { currentState = "Auto skill"; return true; }
             }
-            if (shouldUse && TryCharacterSkill(skillTarget)) { currentState = "Auto skill"; return true; }
         }
         if (currentTarget != null && MovementCooldownRemaining <= 0f &&
             Distance(transform.position, currentTarget.transform.position) > Mathf.Max(9f, unit.AttackRange * 2.2f))
@@ -408,18 +449,13 @@ public class AutoCombatAI : MonoBehaviour
         // Already reserved/using cover.
         if (coverPoint != null)
         {
-            if (!coverPoint.TryReserve(unit))
+            if (!coverPoint.CanBeUsedBy(unit) || !coverPoint.TryReserve(unit))
             {
                 coverPoint = null;
                 return false;
             }
 
-            // Re-check the EXACT cover position every frame. If the enemy moved too far away,
-            // abandon/reject this point BEFORE normal pursuit is allowed to run.
-            float enemyDistanceFromCover = Distance(coverPoint.transform.position, currentTarget.transform.position);
-            if (enemyDistanceFromCover > coverAttackRange ||
-                !coverPoint.ProtectsFrom(currentTarget.transform.position) ||
-                !HasSightFromCover(coverPoint.transform.position, currentTarget, coverPoint.coverCollider))
+            if (!coverPoint.ProtectsFrom(currentTarget.transform.position))
             {
                 RejectCurrentCover();
                 currentState = "Leaving invalid cover";
@@ -432,6 +468,19 @@ public class AutoCombatAI : MonoBehaviour
                 Navigate(coverPoint.transform.position, Mathf.Max(0.1f, coverPoint.occupancyRadius * 0.45f));
                 Move(movementSpeed, true);
                 return true;
+            }
+
+            // The proposal treats a reached obstacle with no valid target in range as used.
+            // Abandoning the obstacle is shared by this team, preventing repeated useless visits.
+            float enemyDistanceFromCover = Distance(coverPoint.transform.position, currentTarget.transform.position);
+            if (enemyDistanceFromCover > coverAttackRange ||
+                !HasSightFromCover(coverPoint.transform.position, currentTarget, coverPoint.coverCollider))
+            {
+                CoverPoint abandoned = coverPoint;
+                coverPoint = null;
+                abandoned.Abandon(unit);
+                currentState = "Leaving abandoned cover";
+                return false;
             }
 
             // COMMIT to this fighting position. Do not fall through into normal Pursuing logic.
@@ -460,7 +509,7 @@ public class AutoCombatAI : MonoBehaviour
         foreach (CoverPoint candidate in CoverPoint.All)
         {
             if (candidate == null) continue;
-            if (!candidate.IsAvailable && !candidate.IsReservedBy(unit)) continue;
+            if (!candidate.CanBeUsedBy(unit)) continue;
             if (candidate == rejectedCoverPoint && Time.time < rejectedCoverUntil) continue;
 
             Vector3 candidatePos = candidate.transform.position;
@@ -474,10 +523,7 @@ public class AutoCombatAI : MonoBehaviour
             // IMPORTANT: ignore ONLY this candidate's own cover collider for outgoing fire.
             if (!HasSightFromCover(candidatePos, currentTarget, candidate.coverCollider)) continue;
 
-            // The SAME range is used when selecting and when fighting from cover.
             float enemyDistance = Distance(candidatePos, currentTarget.transform.position);
-            if (enemyDistance > coverAttackRange) continue;
-
             float firingPenalty = Mathf.Abs(enemyDistance - unit.AttackRange * 0.80f) * 0.35f;
             float tieBreaker = Mathf.Abs((candidate.GetInstanceID() * 0.001f + rosterOrder * 0.173f) % 0.17f);
             float preferenceMultiplier = coverPreference == CoverPreference.High ? 0.65f :
@@ -527,6 +573,36 @@ public class AutoCombatAI : MonoBehaviour
             float distance = Distance(transform.position, candidate.transform.position);
             if (distance < best) { best = distance; currentTarget = candidate; }
         }
+    }
+
+    private bool TryGetFormationDestination(out Vector3 destination)
+    {
+        if (formationMember == null) formationMember = GetComponent<EnemyFormationMember>();
+        if (formationMember != null && currentTarget != null)
+        {
+            Vector3 targetGround = GetNavigationPosition(currentTarget);
+            if (formationMember.TryGetDestination(targetGround, out destination) &&
+                NavMesh.SamplePosition(NavMeshProbe(transform.position), out NavMeshHit start, 2f, NavMesh.AllAreas) &&
+                NavMesh.SamplePosition(destination, out NavMeshHit end, 3.5f, NavMesh.AllAreas))
+            {
+                var formationPath = new NavMeshPath();
+                if (NavMesh.CalculatePath(start.position, end.position, NavMesh.AllAreas, formationPath) &&
+                    formationPath.status == NavMeshPathStatus.PathComplete)
+                {
+                    destination = end.position;
+                    return true;
+                }
+            }
+        }
+        destination = default;
+        return false;
+    }
+
+    private static Vector3 GetNavigationPosition(CombatUnit target)
+    {
+        if (target == null) return default;
+        AutoCombatAI navigation = target.GetComponent<AutoCombatAI>();
+        return navigation == null ? target.transform.position : navigation.NavMeshWorldPosition;
     }
 
     private bool HasSight(CombatUnit target) => HasSightFrom(transform.position, target);
@@ -682,11 +758,14 @@ public class AutoCombatAI : MonoBehaviour
         if (Distance(transform.position, destination) <= stopDistance) { ClearPath(); return; }
         if (Time.time < nextPath && HasPath()) return;
         nextPath = Time.time + pathUpdateInterval;
-        if (!NavMesh.SamplePosition(NavMeshProbe(transform.position), out var start, 2f, NavMesh.AllAreas) ||
-            !NavMesh.SamplePosition(destination, out var end, 2f, NavMesh.AllAreas) ||
-            !NavMesh.CalculatePath(start.position, end.position, NavMesh.AllAreas, path) ||
-            path.status != NavMeshPathStatus.PathComplete)
-        { ClearPath(); currentState = "No path"; return; }
+        if (!NavMesh.SamplePosition(NavMeshProbe(transform.position), out var start, 2f, NavMesh.AllAreas))
+        { ClearPath(); currentState = "No path (start)"; return; }
+        if (!NavMesh.SamplePosition(destination, out var end, 3.5f, NavMesh.AllAreas))
+        { ClearPath(); currentState = "No path (destination)"; return; }
+        if (!NavMesh.CalculatePath(start.position, end.position, NavMesh.AllAreas, path))
+        { ClearPath(); currentState = "No path (calculation)"; return; }
+        if (path.status != NavMeshPathStatus.PathComplete)
+        { ClearPath(); currentState = "No path (incomplete)"; return; }
         corner = path.corners.Length > 1 ? 1 : 0;
     }
 
@@ -766,10 +845,11 @@ public class AutoCombatAI : MonoBehaviour
     {
         if (unit.IsDead || MovementCooldownRemaining > 0f || !unit.SpendMovementPoints(movementCost)) return false;
         ReleaseCover();
-        Vector3 delta = destination - transform.position; delta.y = 0f;
-        destination = transform.position + Vector3.ClampMagnitude(delta, movementRange);
-        if (!NavMesh.SamplePosition(NavMeshProbe(transform.position), out var start, 2f, NavMesh.AllAreas) ||
-            !NavMesh.SamplePosition(destination, out var hit, 3f, NavMesh.AllAreas))
+        Vector3 groundOrigin = NavMeshWorldPosition;
+        Vector3 delta = destination - groundOrigin; delta.y = 0f;
+        destination = groundOrigin + Vector3.ClampMagnitude(delta, movementRange);
+        if (!NavMesh.SamplePosition(groundOrigin, out var start, 2f, NavMesh.AllAreas) ||
+            !NavMesh.SamplePosition(destination, out var hit, 3.5f, NavMesh.AllAreas))
         { unit.RefundMovementPoints(movementCost); return false; }
         if (movementKind == MovementKind.Flash)
         {
@@ -788,39 +868,208 @@ public class AutoCombatAI : MonoBehaviour
 
     public bool TryCharacterSkill(CombatUnit target)
     {
-        if (unit.IsDead || CharacterCooldownRemaining > 0f || BattleDirector.Instance == null ||
-            !BattleDirector.Instance.TrySpendUniversal(characterSkillCost)) return false;
-        bool used = true;
+        Vector3 point = target == null ? transform.position : target.transform.position;
+        return TryCharacterSkillAt(point, target);
+    }
+
+    public bool TryCharacterSkillAt(Vector3 point, CombatUnit target = null)
+    {
+        if (unit.IsDead || CharacterCooldownRemaining > 0f || BattleDirector.Instance == null) return false;
+        Vector3 origin = NavMeshWorldPosition;
+        Vector3 direction = point - origin;
+        direction.y = 0f;
+        if (direction.sqrMagnitude < 0.01f) direction = transform.forward;
+        direction.Normalize();
+
+        bool valid;
+        switch (role)
+        {
+            case CombatRole.MikaSingleTarget:
+                valid = ValidTarget(target, false);
+                break;
+            case CombatRole.MomoiLowCostAOE:
+            case CombatRole.HinaHighCostAOE:
+                valid = Distance(origin, point) <= skillRange + 0.25f;
+                break;
+            case CombatRole.AyaneHealer:
+                valid = Distance(origin, point) <= skillRange + 0.25f;
+                break;
+            case CombatRole.YuukaTank:
+                valid = true;
+                break;
+            default:
+                valid = characterSkillKind == CharacterSkillKind.PowerUp ||
+                    characterSkillKind == CharacterSkillKind.Defensive || ValidTarget(target, characterSkillKind == CharacterSkillKind.Heal);
+                break;
+        }
+        if (!valid || !BattleDirector.Instance.TrySpendUniversal(characterSkillCost)) return false;
+
+        skillCasting = true;
+        ClearPath();
+        StartCoroutine(PerformCharacterSkill(origin, direction, point, target));
+        characterSkillReadyAt = Time.time + characterSkillCooldown;
+        BattleDirector.Instance.NotifyCharacterSkillUsed(this);
+        return true;
+    }
+
+    private IEnumerator PerformCharacterSkill(Vector3 origin, Vector3 direction, Vector3 point, CombatUnit target)
+    {
+        Face(direction);
+        currentState = "Skill windup";
+        if (skillWindup > 0f) yield return new WaitForSeconds(skillWindup);
+        if (unit.IsDead) { skillCasting = false; yield break; }
+
+        switch (role)
+        {
+            case CombatRole.MikaSingleTarget:
+                currentState = "Skill shot";
+                if (target != null && !target.IsDead)
+                {
+                    Vector3 impactPoint = TargetCenter(target);
+                    float travel = SkillVfx.LaunchProjectile(MuzzlePosition(), target.transform, impactPoint,
+                        skillProjectileSpeed, skillRange, new Color(1f, 0.2f, 0.72f, 1f), false, () =>
+                        {
+                            if (target == null || target.IsDead) return;
+                            target.TakeDamage(unit.AttackPower * skillPowerMultiplier, transform.position);
+                            target.ApplyStatus(primaryEffect);
+                            SkillVfx.SpawnBurst(TargetCenter(target), new Color(1f, 0.22f, 0.72f, 1f), 0.55f, 38, 0.9f);
+                        });
+                    yield return new WaitForSeconds(travel);
+                }
+                break;
+            case CombatRole.MomoiLowCostAOE:
+            case CombatRole.HinaHighCostAOE:
+                currentState = "Skill barrage";
+                yield return ApplyConeDamage(origin, direction);
+                break;
+            case CombatRole.AyaneHealer:
+                currentState = "Skill med kit drop";
+                SkillVfx.DropModel(medKitPrefab, point, Vector3.up * skillDropHeight,
+                    skillDropDuration, 1f, true, dropped =>
+                    {
+                        foreach (CombatUnit ally in FindObjectsByType<CombatUnit>(FindObjectsSortMode.None))
+                            if (!ally.IsDead && ally.team == unit.team && Distance(point, ally.transform.position) <= aoeRadius)
+                            {
+                                ally.Heal(skillHealAmount);
+                                ally.ApplyStatus(primaryEffect);
+                            }
+                        SkillVfx.SpawnBurst(point + Vector3.up * 0.15f, new Color(0.2f, 1f, 0.42f, 1f), 0.5f, 46, 1f);
+                    });
+                yield return new WaitForSeconds(skillDropDuration);
+                break;
+            case CombatRole.YuukaTank:
+                currentState = "Skill shield";
+                unit.ApplyShield(shieldAmount, shieldDuration);
+                unit.ApplyStatus(primaryEffect);
+                unit.ApplyStatus(secondaryEffect);
+                SkillShieldVisual.Show(unit, shieldVisualRadius, shieldDuration, shieldMaterial);
+                break;
+            default:
+                ApplyLegacySkill(target);
+                break;
+        }
+
+        currentState = "Skill recovery";
+        if (skillRecovery > 0f) yield return new WaitForSeconds(skillRecovery);
+        skillCasting = false;
+        currentState = "Waiting";
+    }
+
+    private IEnumerator ApplyConeDamage(Vector3 origin, Vector3 direction)
+    {
+        int ticks = Mathf.Max(1, damageTickCount);
+        float interval = ticks <= 1 ? 0f : Mathf.Max(0f, damageTickDuration) / (ticks - 1);
+        float damagePerTick = unit.AttackPower * skillPowerMultiplier / ticks;
+        for (int tick = 0; tick < ticks; tick++)
+        {
+            Color projectileColor = role == CombatRole.HinaHighCostAOE
+                ? new Color(0.24f, 0.04f, 0.42f, 1f)
+                : new Color(1f, 0.48f, 0.34f, 1f);
+            bool whiteCore = role == CombatRole.HinaHighCostAOE;
+            bool fired = false;
+            foreach (CombatUnit enemy in FindObjectsByType<CombatUnit>(FindObjectsSortMode.None))
+            {
+                if (enemy.IsDead || enemy.team == unit.team || !IsInsideCone(origin, direction, enemy.transform.position)) continue;
+                SkillVfx.LaunchProjectile(MuzzlePosition(), enemy.transform, TargetCenter(enemy),
+                    skillProjectileSpeed, skillRange, projectileColor, whiteCore);
+                enemy.TakeDamage(damagePerTick, transform.position);
+                if (tick == 0) enemy.ApplyStatus(primaryEffect);
+                fired = true;
+            }
+            if (!fired)
+            {
+                float spread = Mathf.Lerp(-coneAngle * 0.35f, coneAngle * 0.35f,
+                    ticks <= 1 ? 0.5f : tick / (float)(ticks - 1));
+                Vector3 visualDirection = Quaternion.Euler(0f, spread, 0f) * direction;
+                SkillVfx.LaunchProjectile(MuzzlePosition(), null, origin + visualDirection * skillRange,
+                    skillProjectileSpeed, skillRange, projectileColor, whiteCore);
+            }
+            if (tick + 1 < ticks && interval > 0f) yield return new WaitForSeconds(interval);
+            else yield return null;
+        }
+    }
+
+    private Vector3 MuzzlePosition()
+    {
+        Collider body = GetComponent<Collider>();
+        if (body != null) return body.bounds.center + transform.forward * 0.35f;
+        return transform.position + Vector3.up * 1.1f + transform.forward * 0.35f;
+    }
+
+    private static Vector3 TargetCenter(CombatUnit target)
+    {
+        if (target == null) return Vector3.zero;
+        Collider body = target.GetComponent<Collider>();
+        return body == null ? target.transform.position + Vector3.up : body.bounds.center;
+    }
+
+    public bool IsInsideCone(Vector3 origin, Vector3 direction, Vector3 candidate)
+    {
+        Vector3 delta = candidate - origin;
+        delta.y = 0f;
+        direction.y = 0f;
+        return delta.magnitude <= skillRange && delta.sqrMagnitude > 0.001f &&
+            Vector3.Angle(direction, delta) <= coneAngle * 0.5f;
+    }
+
+    private void ApplyLegacySkill(CombatUnit target)
+    {
         switch (characterSkillKind)
         {
             case CharacterSkillKind.PowerUp:
-                unit.AddTimedModifier(CombatUnit.Stat.Attack, 12f, 0.2f, 8f); break;
+                unit.AddTimedModifier(CombatUnit.Stat.Attack, 12f, 0.2f, 8f);
+                break;
             case CharacterSkillKind.Defensive:
-                unit.ApplyStatus(primaryEffect); unit.ApplyStatus(secondaryEffect);
-                foreach (CombatUnit ally in FindObjectsByType<CombatUnit>(FindObjectsSortMode.None))
-                    if (ally != unit && ally.team == unit.team && !ally.IsDead && Distance(transform.position, ally.transform.position) <= aoeRadius)
-                        ally.ApplyStatus(primaryEffect);
+                unit.ApplyStatus(primaryEffect);
+                unit.ApplyStatus(secondaryEffect);
                 break;
             case CharacterSkillKind.Burst:
-                used = ValidTarget(target, false);
-                if (used) { target.TakeDamage(unit.AttackPower * skillPowerMultiplier, transform.position); target.ApplyStatus(primaryEffect); }
+                if (target != null) target.TakeDamage(unit.AttackPower * skillPowerMultiplier, transform.position);
                 break;
             case CharacterSkillKind.Heal:
-                used = ValidTarget(target, true) && target.HealthRatio < 0.999f;
-                if (used) { target.Heal(skillHealAmount); target.ApplyStatus(primaryEffect); }
+                if (target != null) target.Heal(skillHealAmount);
                 break;
             case CharacterSkillKind.LowCostAOE:
             case CharacterSkillKind.HighCostAOE:
-                used = ValidTarget(target, false);
-                if (used)
+                if (target != null)
                     foreach (CombatUnit enemy in FindObjectsByType<CombatUnit>(FindObjectsSortMode.None))
                         if (!enemy.IsDead && enemy.team != unit.team && Distance(target.transform.position, enemy.transform.position) <= aoeRadius)
-                        { enemy.TakeDamage(unit.AttackPower * skillPowerMultiplier, transform.position); enemy.ApplyStatus(primaryEffect); }
+                            enemy.TakeDamage(unit.AttackPower * skillPowerMultiplier, transform.position);
                 break;
         }
-        if (!used) BattleDirector.Instance.RefundUniversal(characterSkillCost);
-        else characterSkillReadyAt = Time.time + characterSkillCooldown;
-        return used;
+    }
+
+    private string DefaultSkillDescription()
+    {
+        switch (role)
+        {
+            case CombatRole.MikaSingleTarget: return "Drag onto one enemy. Release to deal guaranteed high damage.";
+            case CombatRole.MomoiLowCostAOE: return "Aim the wide fan. Enemies inside take repeated damage.";
+            case CombatRole.HinaHighCostAOE: return "Aim the long fan. Enemies inside take repeated damage.";
+            case CombatRole.AyaneHealer: return "Place the circle. Allies inside recover HP.";
+            case CombatRole.YuukaTank: return "Release to give Yuuka a temporary protective shield.";
+            default: return "Drag to aim, then release to use this skill.";
+        }
     }
 
     private bool ValidTarget(CombatUnit target, bool ally) => target != null && !target.IsDead &&
@@ -833,6 +1082,6 @@ public class AutoCombatAI : MonoBehaviour
         enemyAbilityCooldown = cooldown; enemyAbilityCycle = 0; enemyAbilityReadyAt = Time.time + cooldown * 0.5f;
     }
 
-    private void OnDisable() { ReleaseCover(); }
+    private void OnDisable() { skillCasting = false; ReleaseCover(); }
     private static float Distance(Vector3 a, Vector3 b) { a.y = b.y = 0f; return Vector3.Distance(a, b); }
 }

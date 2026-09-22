@@ -10,6 +10,12 @@ public class DestructibleCover : MonoBehaviour
     public float MaxHealth => maxHealth;
     public bool IsDestroyed { get; private set; }
 
+    public void Configure(float configuredMaxHealth)
+    {
+        maxHealth = Mathf.Max(1f, configuredMaxHealth);
+        currentHealth = maxHealth;
+    }
+
     private void Awake()
     {
         currentHealth = Mathf.Max(1f, maxHealth);

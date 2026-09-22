@@ -1,0 +1,11 @@
+Model Information:
+* title:	Med Kit Red
+* source:	https://sketchfab.com/3d-models/med-kit-red-4254dea2a29242629acbd266334ca578
+* author:	paladin402 (https://sketchfab.com/paladin402)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Med Kit Red" (https://sketchfab.com/3d-models/med-kit-red-4254dea2a29242629acbd266334ca578) by paladin402 (https://sketchfab.com/paladin402) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

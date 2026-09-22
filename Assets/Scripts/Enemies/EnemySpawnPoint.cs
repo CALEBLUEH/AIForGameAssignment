@@ -17,9 +17,10 @@ public class EnemySpawnPoint : MonoBehaviour
     [Min(1)] [SerializeField] private int waveNumber = 1;
     [SerializeField] private List<SpawnEntry> enemies = new List<SpawnEntry>();
     [Header("Formation")]
+    [SerializeField] private EnemyFormationShape formationShape = EnemyFormationShape.Row;
     [Min(0.25f)] [SerializeField] private float horizontalSpacing = 1.6f;
-    [Min(1)] [SerializeField] private int unitsPerRow = 3;
     [Min(0.25f)] [SerializeField] private float rowSpacing = 1.5f;
+    [Min(0.1f)] [SerializeField] private float formationPositionTolerance = 0.55f;
     [Header("NavMesh placement")]
     [Tooltip("Vertical marker mistakes are tolerated as long as the intended baked road is inside this radius.")]
     [Min(0.5f)] [SerializeField] private float navMeshSearchRadius = 25f;
@@ -27,15 +28,16 @@ public class EnemySpawnPoint : MonoBehaviour
 
     public int WaveNumber => waveNumber;
     public IReadOnlyList<SpawnEntry> Enemies => enemies;
+    public EnemyFormationShape FormationShape => formationShape;
+    public float HorizontalSpacing => horizontalSpacing;
+    public float RowSpacing => rowSpacing;
+    public float FormationPositionTolerance => formationPositionTolerance;
 
     public bool TryGetSpawnPosition(int unitIndex, out Vector3 position)
     {
-        int row = unitIndex / Mathf.Max(1, unitsPerRow);
-        int column = unitIndex % Mathf.Max(1, unitsPerRow);
-        int countInRow = Mathf.Min(unitsPerRow, Mathf.Max(1, TotalEnemyCount - row * unitsPerRow));
-        float centeredColumn = column - (countInRow - 1) * 0.5f;
-        Vector3 intended = transform.position + transform.right * (centeredColumn * horizontalSpacing) -
-            transform.forward * (row * rowSpacing);
+        Vector2 offset = EnemyFormationCoordinator.FormationOffset(
+            formationShape, unitIndex, horizontalSpacing, rowSpacing);
+        Vector3 intended = transform.position + transform.right * offset.x + transform.forward * offset.y;
 
         if (NavMesh.SamplePosition(intended, out NavMeshHit hit, navMeshSearchRadius, navMeshAreaMask))
         {
@@ -66,12 +68,20 @@ public class EnemySpawnPoint : MonoBehaviour
             : new List<SpawnEntry>(configuredEnemies);
     }
 
+    public void ConfigureFormation(EnemyFormationShape shape, float spacing, float depth, float tolerance)
+    {
+        formationShape = shape;
+        horizontalSpacing = Mathf.Max(0.25f, spacing);
+        rowSpacing = Mathf.Max(0.25f, depth);
+        formationPositionTolerance = Mathf.Max(0.1f, tolerance);
+    }
+
     private void OnValidate()
     {
         waveNumber = Mathf.Max(1, waveNumber);
-        unitsPerRow = Mathf.Max(1, unitsPerRow);
         horizontalSpacing = Mathf.Max(0.25f, horizontalSpacing);
         rowSpacing = Mathf.Max(0.25f, rowSpacing);
+        formationPositionTolerance = Mathf.Max(0.1f, formationPositionTolerance);
         navMeshSearchRadius = Mathf.Max(0.5f, navMeshSearchRadius);
     }
 
