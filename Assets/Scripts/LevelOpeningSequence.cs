@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
+using UnityEngine.UI;
 
 public sealed class LevelOpeningSequence : MonoBehaviour
 {
@@ -15,6 +16,16 @@ public sealed class LevelOpeningSequence : MonoBehaviour
     [SerializeField] private float cameraPitchDecrease = 10f;
     [Min(0.1f)] [SerializeField] private float navMeshSearchRadius = 4f;
     [SerializeField] private AnimationCurve cameraMotion = AnimationCurve.EaseInOut(0f, 0f, 1f, 1f);
+    [Header("Battle transition presentation")]
+    [SerializeField] private Image initialBlackout;
+    [SerializeField] private Image battleDim;
+    [SerializeField] private Text battleText;
+    [Min(0f)] [SerializeField] private float initialRevealDuration = 0.45f;
+    [Range(0f, 1f)] [SerializeField] private float battleDimAlpha = 0.55f;
+    [Min(0.05f)] [SerializeField] private float battleEnterDuration = 0.45f;
+    [Min(0f)] [SerializeField] private float battleHoldDuration = 0.55f;
+    [Min(0.05f)] [SerializeField] private float battleExitDuration = 0.3f;
+    [Min(0f)] [SerializeField] private float battleDimRestoreDuration = 0.2f;
 
     private AudioListener openingListener;
     private AudioListener gameplayListener;
@@ -27,6 +38,7 @@ public sealed class LevelOpeningSequence : MonoBehaviour
     public IReadOnlyList<Transform> SquadSpawnPoints => squadSpawnPoints;
     public float Duration => duration;
     public bool IsPlaying { get; private set; }
+    public bool BattleAnnouncementPlaying { get; private set; }
     public float AppliedPitchDecrease { get; private set; }
 
     private void Awake()
@@ -35,6 +47,9 @@ public sealed class LevelOpeningSequence : MonoBehaviour
         if (openingCamera != null) openingStartRotation = openingCamera.transform.localRotation;
         SetOpeningCameraActive(false);
         SetGameplayCameraActive(true);
+        SetImageAlpha(initialBlackout, 0f, false);
+        SetImageAlpha(battleDim, 0f, false);
+        if (battleText != null) battleText.gameObject.SetActive(false);
     }
 
     public void Play(IReadOnlyList<AutoCombatAI> selectedSquad, Action completed)
@@ -54,6 +69,21 @@ public sealed class LevelOpeningSequence : MonoBehaviour
         CacheCameraComponents();
     }
 
+    public void ConfigurePresentation(Image authoredInitialBlackout, Image authoredBattleDim,
+        Text authoredBattleText, float revealDuration, float dimAlpha,
+        float enterDuration, float holdDuration, float exitDuration, float restoreDuration)
+    {
+        initialBlackout = authoredInitialBlackout;
+        battleDim = authoredBattleDim;
+        battleText = authoredBattleText;
+        initialRevealDuration = Mathf.Max(0f, revealDuration);
+        battleDimAlpha = Mathf.Clamp01(dimAlpha);
+        battleEnterDuration = Mathf.Max(0.05f, enterDuration);
+        battleHoldDuration = Mathf.Max(0f, holdDuration);
+        battleExitDuration = Mathf.Max(0.05f, exitDuration);
+        battleDimRestoreDuration = Mathf.Max(0f, restoreDuration);
+    }
+
     private IEnumerator PlayRoutine(IReadOnlyList<AutoCombatAI> selectedSquad, Action completed)
     {
         IsPlaying = true;
@@ -62,6 +92,17 @@ public sealed class LevelOpeningSequence : MonoBehaviour
         openingStartRotation = openingCamera != null ? openingCamera.transform.localRotation : Quaternion.identity;
         SetGameplayCameraActive(false);
         SetOpeningCameraActive(true);
+
+        SetImageAlpha(initialBlackout, 1f, true);
+        if (initialRevealDuration > 0f)
+        {
+            for (float reveal = 0f; reveal < initialRevealDuration; reveal += Time.unscaledDeltaTime)
+            {
+                SetImageAlpha(initialBlackout, 1f - Mathf.Clamp01(reveal / initialRevealDuration), true);
+                yield return null;
+            }
+        }
+        SetImageAlpha(initialBlackout, 0f, false);
 
         float elapsed = 0f;
         while (elapsed < duration)
@@ -75,8 +116,62 @@ public sealed class LevelOpeningSequence : MonoBehaviour
         SetOpeningCameraActive(false);
         SetGameplayCameraActive(true);
         IsPlaying = false;
-        runningSequence = null;
         completed?.Invoke();
+        yield return PlayBattleAnnouncement();
+        runningSequence = null;
+    }
+
+    private IEnumerator PlayBattleAnnouncement()
+    {
+        if (battleDim == null || battleText == null) yield break;
+        BattleAnnouncementPlaying = true;
+        SetImageAlpha(battleDim, battleDimAlpha, true);
+        battleText.gameObject.SetActive(true);
+        battleText.text = "BATTLE";
+        battleText.color = new Color(1f, 0.78f, 0.08f, 1f);
+        RectTransform textRect = battleText.rectTransform;
+        float travel = Mathf.Max(900f, Screen.width * 0.75f);
+
+        for (float elapsed = 0f; elapsed < battleEnterDuration; elapsed += Time.unscaledDeltaTime)
+        {
+            float t = Mathf.Clamp01(elapsed / battleEnterDuration);
+            float easeOut = 1f - Mathf.Pow(1f - t, 5f);
+            textRect.anchoredPosition = new Vector2(Mathf.Lerp(-travel, 0f, easeOut), 0f);
+            yield return null;
+        }
+        textRect.anchoredPosition = Vector2.zero;
+        if (battleHoldDuration > 0f) yield return new WaitForSecondsRealtime(battleHoldDuration);
+
+        for (float elapsed = 0f; elapsed < battleExitDuration; elapsed += Time.unscaledDeltaTime)
+        {
+            float t = Mathf.Clamp01(elapsed / battleExitDuration);
+            float easeIn = Mathf.Pow(t, 5f);
+            textRect.anchoredPosition = new Vector2(Mathf.Lerp(0f, travel, easeIn), 0f);
+            yield return null;
+        }
+        textRect.anchoredPosition = new Vector2(travel, 0f);
+        battleText.gameObject.SetActive(false);
+
+        if (battleDimRestoreDuration > 0f)
+        {
+            for (float elapsed = 0f; elapsed < battleDimRestoreDuration; elapsed += Time.unscaledDeltaTime)
+            {
+                float t = Mathf.Clamp01(elapsed / battleDimRestoreDuration);
+                SetImageAlpha(battleDim, Mathf.Lerp(battleDimAlpha, 0f, t), true);
+                yield return null;
+            }
+        }
+        SetImageAlpha(battleDim, 0f, false);
+        BattleAnnouncementPlaying = false;
+    }
+
+    private static void SetImageAlpha(Image image, float alpha, bool active)
+    {
+        if (image == null) return;
+        image.gameObject.SetActive(active);
+        Color color = image.color;
+        color.a = Mathf.Clamp01(alpha);
+        image.color = color;
     }
 
     private void PlaceSquad(IReadOnlyList<AutoCombatAI> selectedSquad)

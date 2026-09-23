@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
@@ -23,6 +24,7 @@ public class BattleDirector : MonoBehaviour
     [Range(0.05f, 1f)] [SerializeField] private float skillTargetingTimeScale = 0.2f;
     public Button[] setupButtons, squadButtons;
     public Button leaderButton, startButton, moveButton, skillButton, healButton, coverButton, restartButton;
+    [SerializeField] private Button confirmButton;
     public Button pauseButton, speedButton, autoButton, resumeButton, backButton;
     [Header("Three-card skill queue")]
     [Tooltip("Exactly three visible cards. When assigned, these replace the legacy Character/Heal/Cover button bindings.")]
@@ -59,6 +61,14 @@ public class BattleDirector : MonoBehaviour
     [Header("Level opening")]
     [Tooltip("Optional reusable two-second squad introduction. Battle AI and waves remain stopped until it completes.")]
     [SerializeField] private LevelOpeningSequence openingSequence;
+    [Header("Post battle presentation")]
+    [SerializeField] private CanvasGroup resultCanvasGroup;
+    [SerializeField] private Text resultDetailsText;
+    [Min(0f)] [SerializeField] private float resultDelay = 2f;
+    [Min(0.05f)] [SerializeField] private float resultFadeDuration = 0.35f;
+    [SerializeField] private string levelSelectionSceneName = "LevelSelection";
+    [SerializeField] private Color victoryTitleColor = new Color(1f, 0.78f, 0.08f, 1f);
+    [SerializeField] private Color defeatTitleColor = new Color(0.92f, 0.22f, 0.22f, 1f);
     [Header("Boss configuration")]
     public string bossName = "Boss 1";
 
@@ -107,6 +117,8 @@ public class BattleDirector : MonoBehaviour
     private bool openingInProgress;
     private int speedLevel = 1;
     [SerializeField] private bool autoEnabled = true;
+    [Min(0.1f)] [SerializeField] private float autoBasicSkillDecisionInterval = 0.35f;
+    private float nextAutoBasicSkillDecision;
     private CombatUnit boss;
     private float nextPhaseTime;
     private enum StagePhase { WaveOne, MovingToWaveTwo, WaveTwo, MovingToBoss, Boss }
@@ -124,6 +136,7 @@ public class BattleDirector : MonoBehaviour
     public float UniversalPoints => universalPoints;
     public bool AutoEnabled => autoEnabled;
     public float BattleSpeed => Mathf.Max(0.1f, speedLevel);
+    public bool IsResultPending => finished && resultPanel != null && !resultPanel.activeSelf;
 
     public void SetEnemyWaveSpawner(EnemyWaveSpawner spawner) => enemyWaveSpawner = spawner;
 
@@ -182,6 +195,7 @@ public class BattleDirector : MonoBehaviour
         setupPanel.SetActive(true);
         battlePanel.SetActive(false);
         resultPanel.SetActive(false);
+        if (resultCanvasGroup != null) resultCanvasGroup.alpha = 0f;
         if (pausePanel != null) pausePanel.SetActive(false);
         RefreshSetup();
     }
@@ -228,8 +242,8 @@ public class BattleDirector : MonoBehaviour
         if (backButton != null) backButton.onClick.AddListener(ReturnToPreparation);
         if (speedButton != null) speedButton.onClick.AddListener(CycleSpeed);
         if (autoButton != null) autoButton.onClick.AddListener(ToggleAuto);
-        restartButton.onClick.AddListener(() => UnityEngine.SceneManagement.SceneManager.LoadScene(
-            UnityEngine.SceneManagement.SceneManager.GetActiveScene().buildIndex));
+        restartButton.onClick.AddListener(RestartBattle);
+        if (confirmButton != null) confirmButton.onClick.AddListener(ReturnToLevelSelection);
     }
 
     private void ToggleMember(int index)
@@ -343,6 +357,11 @@ public class BattleDirector : MonoBehaviour
         universalPoints = Mathf.Min(universalCapacity, universalPoints + universalRegeneration * Time.deltaTime);
         int enemies = CountAlive(CombatUnit.CombatTeam.Enemy);
         int allies = CountAlive(CombatUnit.CombatTeam.Player);
+        if (autoEnabled && UsesSkillQueue && enemies > 0 && Time.time >= nextAutoBasicSkillDecision)
+        {
+            nextAutoBasicSkillDecision = Time.time + autoBasicSkillDecisionInterval;
+            TryAutoUseQueuedBasicSkill();
+        }
         if (allies == 0) { Finish(false); return; }
         if (enemyWaveSpawner != null)
         {
@@ -823,6 +842,119 @@ public class BattleDirector : MonoBehaviour
         return used;
     }
 
+    private bool TryAutoUseQueuedBasicSkill()
+    {
+        if (!isPlaying || !autoEnabled || !UsesSkillQueue || skillQueueTransitioning ||
+            targetMode != TargetMode.None) return false;
+
+        int visibleCount = Mathf.Min(3, skillQueue.Count);
+        // Healing is the only skill that waits for a condition. If it is visible and
+        // an ally is injured, it gets first priority and selects the lowest HP ratio.
+        for (int i = 0; i < visibleCount; i++)
+        {
+            QueuedSkill heal = skillQueue[i];
+            if (heal.kind != QueuedSkillKind.Heal || universalPoints < healCost) continue;
+            CombatUnit ally = FindLowestHealthAlly(true);
+            if (ally != null && TryResolveBasicSkill(heal.kind, ally.transform.position, out _, null))
+            {
+                ConsumeQueuedSkill(heal);
+                return true;
+            }
+        }
+
+        for (int i = 0; i < visibleCount; i++)
+        {
+            QueuedSkill entry = skillQueue[i];
+            if (entry.kind == QueuedSkillKind.Character || entry.kind == QueuedSkillKind.Heal ||
+                universalPoints < CostFor(entry)) continue;
+            if (!TryAutoUseBasicEntry(entry)) continue;
+            ConsumeQueuedSkill(entry);
+            return true;
+        }
+        return false;
+    }
+
+    private bool TryAutoUseBasicEntry(QueuedSkill entry)
+    {
+        if (entry.kind == QueuedSkillKind.Buff)
+        {
+            CombatUnit damageDealer = FindHighestDamageAlly();
+            return damageDealer != null && TryResolveBasicSkill(entry.kind,
+                damageDealer.transform.position, out _, null);
+        }
+        if (entry.kind == QueuedSkillKind.Airstrike)
+        {
+            CombatUnit target = FindBestAirstrikeTarget();
+            return target != null && TryResolveBasicSkill(entry.kind, target.transform.position, out _, null);
+        }
+        if (entry.kind == QueuedSkillKind.Cover)
+        {
+            CombatUnit protectedAlly = FindLowestHealthAlly(false) ?? FindHighestDamageAlly();
+            CombatUnit enemy = FindNearestEnemy(protectedAlly == null ? Vector3.zero : protectedAlly.transform.position);
+            if (protectedAlly == null || enemy == null) return false;
+            Vector3 direction = enemy.transform.position - protectedAlly.transform.position;
+            direction.y = 0f;
+            if (direction.sqrMagnitude < 0.01f) direction = protectedAlly.transform.forward;
+            Vector3 placement = protectedAlly.transform.position + direction.normalized * 2f;
+            AutoCombatAI context = protectedAlly.GetComponent<AutoCombatAI>();
+            return TryResolveBasicSkill(entry.kind, placement, out _, context);
+        }
+        return false;
+    }
+
+    private CombatUnit FindLowestHealthAlly(bool requireInjured)
+    {
+        CombatUnit best = null;
+        foreach (CombatUnit candidate in FindObjectsByType<CombatUnit>(FindObjectsSortMode.None))
+        {
+            if (candidate.IsDead || candidate.team != CombatUnit.CombatTeam.Player ||
+                (requireInjured && candidate.HealthRatio >= 0.999f)) continue;
+            if (best == null || candidate.HealthRatio < best.HealthRatio ||
+                (Mathf.Approximately(candidate.HealthRatio, best.HealthRatio) && candidate.CurrentHealth < best.CurrentHealth))
+                best = candidate;
+        }
+        return best;
+    }
+
+    private CombatUnit FindHighestDamageAlly()
+    {
+        CombatUnit best = null;
+        foreach (CombatUnit candidate in FindObjectsByType<CombatUnit>(FindObjectsSortMode.None))
+            if (!candidate.IsDead && candidate.team == CombatUnit.CombatTeam.Player &&
+                (best == null || candidate.AttackPower > best.AttackPower)) best = candidate;
+        return best;
+    }
+
+    private CombatUnit FindBestAirstrikeTarget()
+    {
+        CombatUnit best = null;
+        int bestCount = -1;
+        CombatUnit[] units = FindObjectsByType<CombatUnit>(FindObjectsSortMode.None);
+        foreach (CombatUnit candidate in units)
+        {
+            if (candidate.IsDead || candidate.team != CombatUnit.CombatTeam.Enemy) continue;
+            int count = 0;
+            foreach (CombatUnit other in units)
+                if (!other.IsDead && other.team == CombatUnit.CombatTeam.Enemy &&
+                    FlatDistance(candidate.transform.position, other.transform.position) <= airstrikeRadius) count++;
+            if (count > bestCount) { bestCount = count; best = candidate; }
+        }
+        return best;
+    }
+
+    private static CombatUnit FindNearestEnemy(Vector3 origin)
+    {
+        CombatUnit best = null;
+        float bestDistance = float.PositiveInfinity;
+        foreach (CombatUnit candidate in FindObjectsByType<CombatUnit>(FindObjectsSortMode.None))
+        {
+            if (candidate.IsDead || candidate.team != CombatUnit.CombatTeam.Enemy) continue;
+            float distance = FlatDistance(origin, candidate.transform.position);
+            if (distance < bestDistance) { bestDistance = distance; best = candidate; }
+        }
+        return best;
+    }
+
     private void TryBeginMovementDrag()
     {
         if (Camera.main == null) return;
@@ -896,7 +1028,8 @@ public class BattleDirector : MonoBehaviour
         ResolveTargetAt(pointer);
     }
 
-    private bool TryResolveBasicSkill(QueuedSkillKind kind, Vector3 pointer, out Vector3 feedbackPosition)
+    private bool TryResolveBasicSkill(QueuedSkillKind kind, Vector3 pointer, out Vector3 feedbackPosition,
+        AutoCombatAI context = null)
     {
         feedbackPosition = pointer;
         if (kind == QueuedSkillKind.Heal || kind == QueuedSkillKind.Buff)
@@ -949,7 +1082,9 @@ public class BattleDirector : MonoBehaviour
         if (kind == QueuedSkillKind.Cover)
         {
             if (!TrySpendUniversal(coverCost)) return false;
-            Vector3 facing = Selected.transform.position - pointer;
+            AutoCombatAI coverOwner = context != null ? context : Selected;
+            if (coverOwner == null) { RefundUniversal(coverCost); return false; }
+            Vector3 facing = coverOwner.transform.position - pointer;
             facing.y = 0f;
             if (facing.sqrMagnitude < 0.01f) facing = Vector3.forward;
             Quaternion rotation = Quaternion.LookRotation(facing.normalized);
@@ -1328,10 +1463,47 @@ public class BattleDirector : MonoBehaviour
         Time.timeScale = 1f;
         int stars = playerDeaths == 0 ? 3 : playerDeaths == 1 ? 2 : 1;
         if (won) GameProgress.CompleteLevel(levelNumber, stars);
-        resultText.text = won ? "VICTORY\n" + new string('★', stars) + new string('☆', 3 - stars) +
-            "\n" + playerDeaths + " deployed character" + (playerDeaths == 1 ? "" : "s") + " lost" :
-            "DEFEAT\nYour squad has fallen.";
-        battlePanel.SetActive(false);
+        StartCoroutine(ShowResultAfterDelay(won, stars));
+    }
+
+    private IEnumerator ShowResultAfterDelay(bool won, int stars)
+    {
+        if (resultPanel != null) resultPanel.SetActive(false);
+        yield return new WaitForSecondsRealtime(Mathf.Max(0f, resultDelay));
+        if (resultText != null)
+        {
+            resultText.text = won ? "VICTORY" : "DEFEAT";
+            resultText.color = won ? victoryTitleColor : defeatTitleColor;
+        }
+        if (resultDetailsText != null)
+            resultDetailsText.text = won
+                ? new string('★', stars) + new string('☆', 3 - stars) + "\n" + playerDeaths +
+                  " deployed character" + (playerDeaths == 1 ? "" : "s") + " lost"
+                : "Your squad has fallen.";
+        if (resultPanel == null) yield break;
         resultPanel.SetActive(true);
+        if (resultCanvasGroup == null) yield break;
+        resultCanvasGroup.alpha = 0f;
+        float duration = Mathf.Max(0.05f, resultFadeDuration);
+        for (float elapsedFade = 0f; elapsedFade < duration; elapsedFade += Time.unscaledDeltaTime)
+        {
+            resultCanvasGroup.alpha = Mathf.Clamp01(elapsedFade / duration);
+            yield return null;
+        }
+        resultCanvasGroup.alpha = 1f;
+    }
+
+    private void RestartBattle()
+    {
+        Time.timeScale = 1f;
+        UnityEngine.SceneManagement.SceneManager.LoadScene(
+            UnityEngine.SceneManagement.SceneManager.GetActiveScene().buildIndex);
+    }
+
+    private void ReturnToLevelSelection()
+    {
+        Time.timeScale = 1f;
+        if (!string.IsNullOrWhiteSpace(levelSelectionSceneName))
+            UnityEngine.SceneManagement.SceneManager.LoadScene(levelSelectionSceneName);
     }
 }

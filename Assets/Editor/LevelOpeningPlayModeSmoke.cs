@@ -52,15 +52,28 @@ public static class LevelOpeningPlayModeSmoke
             }
             double openingElapsed = EditorApplication.timeSinceStartup -
                 double.Parse(observedText, CultureInfo.InvariantCulture);
+            if (openingElapsed > 12d)
+                throw new TimeoutException("Opening transition did not complete within twelve seconds.");
             if (phase == 0 && openingElapsed > 0.35d)
             {
                 ValidateOpening();
                 SessionState.SetInt(PhaseKey, 1);
             }
-            if (phase == 1 && openingElapsed > 2.5d)
+            if (phase == 1 && openingElapsed > 2d)
             {
+                BattleDirector director = UnityEngine.Object.FindFirstObjectByType<BattleDirector>();
+                LevelOpeningSequence sequence = UnityEngine.Object.FindFirstObjectByType<LevelOpeningSequence>();
+                if (director == null || sequence == null || !director.IsPlaying ||
+                    !sequence.BattleAnnouncementPlaying) return;
                 ValidateGameplay();
-                Debug.Log("LEVEL_OPENING_PLAYMODE_OK four chosen characters spawned at authored markers, idled for two seconds, camera pitched down, then gameplay and waves started.");
+                SessionState.SetInt(PhaseKey, 2);
+            }
+            if (phase == 2)
+            {
+                LevelOpeningSequence sequence = UnityEngine.Object.FindFirstObjectByType<LevelOpeningSequence>();
+                if (sequence == null || sequence.BattleAnnouncementPlaying) return;
+                ValidateAnnouncementFinished();
+                Debug.Log("LEVEL_OPENING_PLAYMODE_OK black reveal, four-character idle opening, camera handoff, concurrent BATTLE announcement, and dim restoration passed.");
                 Finish();
             }
         }
@@ -101,6 +114,22 @@ public static class LevelOpeningPlayModeSmoke
             throw new InvalidOperationException("Gameplay did not begin after the opening sequence.");
         if (sequence.OpeningCamera.enabled || !sequence.GameplayCamera.enabled)
             throw new InvalidOperationException("Camera did not return to the main gameplay camera.");
+        if (!sequence.BattleAnnouncementPlaying)
+            throw new InvalidOperationException("BATTLE announcement was not playing over the active battle.");
+        GameObject text = GameObject.Find("Battle Announcement Text");
+        GameObject dim = GameObject.Find("Battle Announcement Dim");
+        if (text == null || dim == null || !text.activeInHierarchy || !dim.activeInHierarchy)
+            throw new InvalidOperationException("BATTLE text or dim overlay was not visible during the gameplay handoff.");
+    }
+
+    private static void ValidateAnnouncementFinished()
+    {
+        BattleDirector director = UnityEngine.Object.FindFirstObjectByType<BattleDirector>();
+        LevelOpeningSequence sequence = UnityEngine.Object.FindFirstObjectByType<LevelOpeningSequence>();
+        if (director == null || sequence == null || !director.IsPlaying || sequence.BattleAnnouncementPlaying)
+            throw new InvalidOperationException("Gameplay or announcement completion state is incorrect.");
+        if (GameObject.Find("Battle Announcement Text") != null || GameObject.Find("Battle Announcement Dim") != null)
+            throw new InvalidOperationException("BATTLE presentation remained active after its exit animation.");
     }
 
     private static void Finish()

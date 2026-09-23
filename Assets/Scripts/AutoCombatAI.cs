@@ -74,6 +74,7 @@ public class AutoCombatAI : MonoBehaviour
     public int aoeMinimumEnemyCount = 2;
     public int expensiveAoeMinimumEnemyCount = 3;
     public float autoDecisionInterval = 0.4f;
+    [Range(0.5f, 1f)] public float autoMovementAttackRangeFraction = 0.92f;
     [Header("Enemy engagement")]
     [Tooltip("Enemies stay at their spawn/guard position until a player enters this range.")]
     public float enemyDetectionRange = 14f;
@@ -342,26 +343,36 @@ public class AutoCombatAI : MonoBehaviour
                 bool shouldUse = false;
                 switch (role)
                 {
-                    case CombatRole.YuukaTank:
-                        shouldUse = unit.HealthRatio <= defensiveHealthThreshold || CountInjuredAllies(defensiveHealthThreshold) >= 2;
-                        break;
-                    case CombatRole.AyaneHealer: shouldUse = skillTarget != null && skillTarget.HealthRatio < healingThreshold; break;
+                    case CombatRole.YuukaTank: shouldUse = skillTarget != null; break;
+                    case CombatRole.AyaneHealer: shouldUse = skillTarget != null && skillTarget.HealthRatio < 0.999f; break;
                     case CombatRole.MikaSingleTarget: shouldUse = skillTarget != null; break;
-                    case CombatRole.MomoiLowCostAOE: shouldUse = skillTarget != null && CountEnemiesNear(skillTarget.transform.position, aoeRadius) >= aoeMinimumEnemyCount; break;
-                    case CombatRole.HinaHighCostAOE:
-                        shouldUse = skillTarget != null && (CountEnemiesNear(skillTarget.transform.position, aoeRadius) >= expensiveAoeMinimumEnemyCount || skillTarget.IsBoss);
-                        break;
+                    case CombatRole.MomoiLowCostAOE: shouldUse = skillTarget != null; break;
+                    case CombatRole.HinaHighCostAOE: shouldUse = skillTarget != null; break;
                 }
                 if (shouldUse && TryCharacterSkill(skillTarget)) { currentState = "Auto skill"; return true; }
             }
         }
-        if (currentTarget != null && MovementCooldownRemaining <= 0f &&
-            Distance(transform.position, currentTarget.transform.position) > Mathf.Max(9f, unit.AttackRange * 2.2f))
+        if (TryGetAutoMovementDestination(currentTarget, out Vector3 destination))
         {
-            Vector3 toward = (currentTarget.transform.position - transform.position).normalized;
-            if (TryMovementSkill(transform.position + toward * movementRange)) { currentState = "Auto movement skill"; return true; }
+            if (TryMovementSkill(destination)) { currentState = "Auto movement to attack range"; return true; }
         }
         return false;
+    }
+
+    private bool TryGetAutoMovementDestination(CombatUnit target, out Vector3 destination)
+    {
+        destination = NavMeshWorldPosition;
+        if (target == null || target.IsDead || MovementCooldownRemaining > 0f ||
+            !unit.IsMovementGaugeFull) return false;
+
+        Vector3 toward = target.transform.position - destination;
+        toward.y = 0f;
+        float distance = toward.magnitude;
+        float preferredRange = Mathf.Max(0.5f, unit.AttackRange * autoMovementAttackRangeFraction);
+        if (distance <= preferredRange + 0.2f || toward.sqrMagnitude <= 0.001f) return false;
+        float travel = Mathf.Min(movementRange, distance - preferredRange);
+        destination += toward.normalized * travel;
+        return true;
     }
 
     private CombatUnit FindAutoSkillTarget()
@@ -375,6 +386,7 @@ public class AutoCombatAI : MonoBehaviour
             if (role == CombatRole.AyaneHealer)
             {
                 if (!ally || Distance(transform.position, candidate.transform.position) > skillRange) continue;
+                if (candidate.HealthRatio >= 0.999f) continue;
                 float score = 1f - candidate.HealthRatio;
                 if (score > bestScore) { bestScore = score; best = candidate; }
                 continue;
