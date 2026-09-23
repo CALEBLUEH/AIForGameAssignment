@@ -8,6 +8,9 @@ public class TacticalCameraFollow : MonoBehaviour
     public Vector2 xLimits = new Vector2(-8f, 58f);
     private Vector3 velocity;
 
+    public float VerticalOffset => offset.y;
+    public void SetVerticalOffset(float value) => offset.y = Mathf.Clamp(value, 20f, 40f);
+
     private void LateUpdate()
     {
         Vector3 center = Vector3.zero;

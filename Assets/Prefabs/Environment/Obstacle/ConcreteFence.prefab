@@ -336,8 +336,8 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 0.01, y: 0.01, z: 0.01}
-  m_ConstrainProportionsScale: 0
+  m_LocalScale: {x: 0.050000004, y: 0.050000004, z: 0.050000004}
+  m_ConstrainProportionsScale: 1
   m_Children:
   - {fileID: 2647403181101608325}
   - {fileID: 5288264976259172941}
@@ -437,8 +437,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 71c9e86598ed10545b1ade1011e7dbd8, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::DestructibleCover
-  maxHealth: 180
-  currentHealth: 180
+  maxHealth: 20
+  currentHealth: 20
 --- !u!1 &6685307632841901201
 GameObject:
   m_ObjectHideFlags: 0

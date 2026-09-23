@@ -10,6 +10,7 @@ public class LevelSelectionController : MonoBehaviour
     private void Awake()
     {
         Time.timeScale = 1f;
+        GameProgress.ClearPendingBattleSelection();
         for (int i = 0; i < levelCards.Length; i++)
         {
             int level = i + 1;
@@ -21,7 +22,7 @@ public class LevelSelectionController : MonoBehaviour
     private void SelectLevel(int level)
     {
         if (!GameProgress.IsLevelUnlocked(level)) return;
-        GameProgress.SelectedLevel = level;
-        SceneManager.LoadScene(preparationSceneName);
+        GameProgress.PrepareLevelSelection(level);
+        SceneManager.LoadScene(GameProgress.PreparationSceneName);
     }
 }

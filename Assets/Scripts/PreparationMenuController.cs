@@ -147,8 +147,6 @@ public class PreparationMenuController : MonoBehaviour
         var names = new List<string>();
         for (int i = 0; i < selected.Length; i++) if (selected[i]) names.Add(characterNames[i]);
         GameProgress.SetSelectedCharacters(names);
-        SceneManager.LoadScene(string.IsNullOrWhiteSpace(battleSceneOverride)
-            ? GameProgress.SelectedBattleScene
-            : battleSceneOverride);
+        SceneManager.LoadScene(GameProgress.ConsumeBattleScene(battleSceneOverride));
     }
 }

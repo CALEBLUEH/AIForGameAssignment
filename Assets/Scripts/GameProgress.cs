@@ -6,7 +6,9 @@ public static class GameProgress
     private const string UnlockedLevelKey = "AIFG.UnlockedLevel";
     private const string SelectedLevelKey = "AIFG.SelectedLevel";
     private const string SelectedCharactersKey = "AIFG.SelectedCharacters";
+    private const string PendingBattleKey = "AIFG.PendingBattleSelection";
     private static readonly string[] DefaultSquad = { "Yuuka", "Ayane", "Mika", "Momoi" };
+    public const string PreparationSceneName = "SandBox_Preparation";
 
     public static int UnlockedLevel => Mathf.Clamp(PlayerPrefs.GetInt(UnlockedLevelKey, 1), 1, 3);
     public static int SelectedLevel
@@ -16,8 +18,35 @@ public static class GameProgress
     }
 
     public static string SelectedBattleScene => BattleSceneForLevel(SelectedLevel);
-    public static string BattleSceneForLevel(int level) => level == 2 ? "GameplayLevel2" :
-        level == 3 ? "GameplayLevel3" : "GameplayAI";
+    public static string BattleSceneForLevel(int level) => level == 2 ? "Gameplay_Level2" :
+        level == 3 ? "Gameplay_Level3" : "Gameplay_Level1";
+    public static int LevelForBattleScene(string sceneName, int fallback = 1)
+    {
+        if (sceneName == "Gameplay_Level1") return 1;
+        if (sceneName == "Gameplay_Level2") return 2;
+        if (sceneName == "Gameplay_Level3") return 3;
+        return Mathf.Clamp(fallback, 1, 3);
+    }
+
+    public static void PrepareLevelSelection(int level)
+    {
+        SelectedLevel = level;
+        PlayerPrefs.SetInt(PendingBattleKey, 1);
+        PlayerPrefs.Save();
+    }
+
+    public static void ClearPendingBattleSelection() => PlayerPrefs.DeleteKey(PendingBattleKey);
+
+    public static string ConsumeBattleScene(string fallbackScene)
+    {
+        if (PlayerPrefs.GetInt(PendingBattleKey, 0) == 0 && !string.IsNullOrWhiteSpace(fallbackScene))
+            return fallbackScene;
+        PlayerPrefs.DeleteKey(PendingBattleKey);
+        PlayerPrefs.Save();
+        return SelectedBattleScene;
+    }
+
+    public static int StarsForPlayerDeaths(int playerDeaths) => playerDeaths <= 0 ? 3 : playerDeaths == 1 ? 2 : 1;
     public static bool IsLevelUnlocked(int level) => level <= UnlockedLevel;
     public static int GetStars(int level) => Mathf.Clamp(PlayerPrefs.GetInt("AIFG.LevelStars." + level, 0), 0, 3);
 

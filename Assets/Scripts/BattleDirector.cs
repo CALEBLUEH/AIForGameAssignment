@@ -162,6 +162,8 @@ public class BattleDirector : MonoBehaviour
     private void Awake()
     {
         Instance = this;
+        levelNumber = GameProgress.LevelForBattleScene(
+            UnityEngine.SceneManagement.SceneManager.GetActiveScene().name, levelNumber);
         targetHighlighter = new SkillTargetHighlighter(targetOutlineMaterial);
         Time.timeScale = 1f;
         AudioSettingsUI.ApplySavedVolume();
@@ -192,6 +194,9 @@ public class BattleDirector : MonoBehaviour
             enemyTemplates.Add(template);
         }
         BindButtons();
+        BattleRuntimeHudControls runtimeControls = GetComponent<BattleRuntimeHudControls>();
+        if (runtimeControls == null) runtimeControls = gameObject.AddComponent<BattleRuntimeHudControls>();
+        runtimeControls.Initialize(battlePanel, pausePanel, RestartBattle);
         setupPanel.SetActive(true);
         battlePanel.SetActive(false);
         resultPanel.SetActive(false);
@@ -1388,7 +1393,8 @@ public class BattleDirector : MonoBehaviour
                     selectedMember.CharacterCooldownRemaining, universalPoints >= selectedMember.characterSkillCost);
         }
         RefreshSkillQueue();
-        bool showBoss = boss != null && !boss.IsDead && phase == StagePhase.Boss;
+        RefreshBossReference();
+        bool showBoss = boss != null && !boss.IsDead;
         if (bossHealthPanel != null) bossHealthPanel.SetActive(showBoss);
         if (showBoss && bossHealthSlider != null)
         {
@@ -1404,6 +1410,18 @@ public class BattleDirector : MonoBehaviour
             bool isSelected = alive && deployedIndices[i] == selectedIndex;
             squadButtons[i].GetComponentInChildren<Text>().text = (isSelected ? "▶ " : "") +
                 (alive ? member.name : i < deployedIndices.Count ? "DOWN" : "EMPTY");
+        }
+    }
+
+    private void RefreshBossReference()
+    {
+        if (boss != null && !boss.IsDead && boss.gameObject.activeInHierarchy) return;
+        boss = null;
+        foreach (CombatUnit candidate in FindObjectsByType<CombatUnit>(FindObjectsSortMode.None))
+        {
+            if (candidate.IsDead || candidate.team != CombatUnit.CombatTeam.Enemy || !candidate.IsBoss) continue;
+            boss = candidate;
+            break;
         }
     }
 
@@ -1429,7 +1447,8 @@ public class BattleDirector : MonoBehaviour
     private void ReturnToPreparation()
     {
         Time.timeScale = 1f;
-        UnityEngine.SceneManagement.SceneManager.LoadScene(preparationSceneName);
+        GameProgress.PrepareLevelSelection(levelNumber);
+        UnityEngine.SceneManagement.SceneManager.LoadScene(GameProgress.PreparationSceneName);
     }
 
     private void CycleSpeed()
@@ -1461,7 +1480,7 @@ public class BattleDirector : MonoBehaviour
         isPlaying = false;
         ExitTargeting();
         Time.timeScale = 1f;
-        int stars = playerDeaths == 0 ? 3 : playerDeaths == 1 ? 2 : 1;
+        int stars = GameProgress.StarsForPlayerDeaths(playerDeaths);
         if (won) GameProgress.CompleteLevel(levelNumber, stars);
         StartCoroutine(ShowResultAfterDelay(won, stars));
     }

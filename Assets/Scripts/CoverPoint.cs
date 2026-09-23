@@ -49,7 +49,9 @@ public class CoverPoint : MonoBehaviour
     public void Occupy(CombatUnit unit)
     {
         if (occupant != unit) return;
-        unit.SetCoverProtection(protection, this);
+        // Tactical cover owns the incoming hit until its health is depleted.
+        // Keep this gameplay contract independent from older serialized protection values.
+        unit.SetCoverProtection(1f, this);
     }
 
     public bool ProtectsFrom(Vector3 enemyPosition)

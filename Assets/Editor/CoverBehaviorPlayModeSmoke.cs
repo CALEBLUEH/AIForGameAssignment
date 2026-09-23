@@ -109,16 +109,22 @@ public static class CoverBehaviorPlayModeSmoke
         float initialPlayerHealth = player.Unit.CurrentHealth;
         if (!point.TryReserve(player.Unit)) throw new InvalidOperationException("Player could not re-reserve cover.");
         point.Occupy(player.Unit);
-        player.Unit.TakeDamage(25f, enemy.transform.position);
+        float safePlayerRawDamage = Mathf.Max(1f, Mathf.Min(5f, health.CurrentHealth * 0.25f));
+        player.Unit.TakeDamage(player.Unit.Defense + safePlayerRawDamage, enemy.transform.position);
         if (health.CurrentHealth >= initialHealth)
             throw new InvalidOperationException("Enemy damage against a covered player did not reduce universal obstacle health.");
         if (player.Unit.CurrentHealth < initialPlayerHealth)
-            throw new InvalidOperationException("Damage leaked through cover before its health was depleted.");
+            throw new InvalidOperationException("Damage leaked through cover before its health was depleted. " +
+                "player=" + initialPlayerHealth + "->" + player.Unit.CurrentHealth +
+                ", cover=" + afterRadius + "->" + health.CurrentHealth +
+                ", activePoint=" + (player.Unit.ActiveCoverPoint == point) +
+                ", pointCover=" + (point.Destructible == health));
         point.Release(player.Unit);
         float afterEnemyDamage = health.CurrentHealth;
         if (!point.TryReserve(enemy.Unit)) throw new InvalidOperationException("Enemy could not reserve released cover.");
         point.Occupy(enemy.Unit);
-        enemy.Unit.TakeDamage(25f, player.transform.position);
+        float safeEnemyRawDamage = Mathf.Max(1f, Mathf.Min(5f, health.CurrentHealth * 0.25f));
+        enemy.Unit.TakeDamage(enemy.Unit.Defense + safeEnemyRawDamage, player.transform.position);
         if (health.CurrentHealth >= afterEnemyDamage)
             throw new InvalidOperationException("Player damage against a covered enemy did not reduce universal obstacle health.");
         point.Release(enemy.Unit);

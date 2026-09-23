@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.AI;
 
 [DisallowMultipleComponent]
 public sealed class TacticalCoverObstacle : MonoBehaviour
@@ -25,6 +26,8 @@ public sealed class TacticalCoverObstacle : MonoBehaviour
         abandonedTeams.Clear();
         reservations.Clear();
     }
+
+    private void Start() => EnsureRuntimeCoverPoints();
 
     private void OnDisable()
     {
@@ -65,6 +68,76 @@ public sealed class TacticalCoverObstacle : MonoBehaviour
     }
 
     public void ConfigureCapacity(int configuredCapacity) => capacity = Mathf.Max(1, configuredCapacity);
+
+    /// <summary>
+    /// Level scenes may contain cover prefabs without scene-authored standing points.
+    /// Generate reachable points only for those instances; authored Sandbox points are
+    /// left untouched and nothing is written back to the scene or prefab.
+    /// </summary>
+    public int EnsureRuntimeCoverPoints()
+    {
+        if (GetComponentsInChildren<CoverPoint>(true).Length > 0) return 0;
+
+        Collider physical = null;
+        float largestBounds = 0f;
+        foreach (Collider candidate in GetComponentsInChildren<Collider>(true))
+        {
+            if (candidate == null || candidate.isTrigger) continue;
+            float size = candidate.bounds.size.sqrMagnitude;
+            if (size <= largestBounds) continue;
+            largestBounds = size;
+            physical = candidate;
+        }
+        if (physical == null) return 0;
+
+        GameObject root = new GameObject("Runtime Cover Points");
+        root.transform.SetParent(transform, false);
+
+        Vector3 right = Vector3.ProjectOnPlane(transform.right, Vector3.up).normalized;
+        Vector3 forward = Vector3.ProjectOnPlane(transform.forward, Vector3.up).normalized;
+        float rightThickness = ProjectedExtent(physical.bounds.extents, right);
+        float forwardThickness = ProjectedExtent(physical.bounds.extents, forward);
+        Vector3 primary = rightThickness <= forwardThickness ? right : forward;
+        Vector3 secondary = primary == right ? forward : right;
+
+        int created = CreateOpposingPoints(root.transform, physical, primary);
+        if (created == 0) created = CreateOpposingPoints(root.transform, physical, secondary);
+        if (created == 0) Destroy(root);
+        return created;
+    }
+
+    private int CreateOpposingPoints(Transform root, Collider physical, Vector3 axis)
+    {
+        int created = 0;
+        foreach (Vector3 direction in new[] { axis, -axis })
+        {
+            Ray ray = new Ray(physical.bounds.center + direction * 100f, -direction);
+            if (!physical.Raycast(ray, out RaycastHit surface, 200f)) continue;
+            Vector3 intended = surface.point + direction * 1.1f;
+            if (!NavMesh.SamplePosition(intended, out NavMeshHit navHit, 3f, NavMesh.AllAreas)) continue;
+
+            bool duplicate = false;
+            foreach (CoverPoint existing in root.GetComponentsInChildren<CoverPoint>())
+            {
+                Vector3 delta = existing.transform.position - navHit.position;
+                delta.y = 0f;
+                if (delta.sqrMagnitude < 0.64f) { duplicate = true; break; }
+            }
+            if (duplicate) continue;
+
+            GameObject pointObject = new GameObject("Runtime Cover Point " + (created + 1));
+            pointObject.transform.SetParent(root, true);
+            pointObject.transform.position = navHit.position;
+            pointObject.transform.rotation = Quaternion.LookRotation(direction, Vector3.up);
+            CoverPoint point = pointObject.AddComponent<CoverPoint>();
+            point.Configure(physical, this, 1f, 0.65f);
+            created++;
+        }
+        return created;
+    }
+
+    private static float ProjectedExtent(Vector3 extents, Vector3 axis) =>
+        Mathf.Abs(axis.x) * extents.x + Mathf.Abs(axis.y) * extents.y + Mathf.Abs(axis.z) * extents.z;
 
     private void RemoveInvalidReservations()
     {

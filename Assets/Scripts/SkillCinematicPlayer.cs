@@ -6,7 +6,17 @@ using UnityEngine.Video;
 [DisallowMultipleComponent]
 public sealed class SkillCinematicPlayer : MonoBehaviour
 {
+    private const string EnabledPreferenceKey = "AIFG.SkillCinematicsEnabled";
     public static SkillCinematicPlayer Instance { get; private set; }
+    public static bool SkillVideosEnabled
+    {
+        get => PlayerPrefs.GetInt(EnabledPreferenceKey, 1) != 0;
+        set
+        {
+            PlayerPrefs.SetInt(EnabledPreferenceKey, value ? 1 : 0);
+            PlayerPrefs.Save();
+        }
+    }
 
     [SerializeField] private RawImage videoImage;
     [SerializeField] private VideoPlayer videoPlayer;
@@ -43,6 +53,7 @@ public sealed class SkillCinematicPlayer : MonoBehaviour
 
     public IEnumerator Play(AutoCombatAI.CombatRole role)
     {
+        if (!SkillVideosEnabled) yield break;
         VideoClip clip = ClipFor(role);
         if (clip == null || videoPlayer == null || videoImage == null || Application.isBatchMode) yield break;
         while (sequenceRunning) yield return null;

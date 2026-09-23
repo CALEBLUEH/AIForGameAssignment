@@ -23,13 +23,13 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/Scenes/Preparation.unity
     guid: 36ff8f55c0ee409409c4a84570a64a92
-  - enabled: 1
+  - enabled: 0
     path: Assets/Scenes/GameplayAI.unity
     guid: e38d39eab4f95f54aa4b14183aa0572c
-  - enabled: 1
+  - enabled: 0
     path: Assets/Scenes/GameplayLevel2.unity
     guid: f1f6b80f6af84634eb8b8cf592b5d2a9
-  - enabled: 1
+  - enabled: 0
     path: Assets/Scenes/GameplayLevel3.unity
     guid: eb7e65ebdc279aa498865e6a28e4df3f
   - enabled: 1
@@ -38,6 +38,15 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/Scenes/Sandbox_Gameplay.unity
     guid: b1ad304c3fd2832409a40f87268e03de
+  - enabled: 1
+    path: Assets/Scenes/Gameplay_Level1.unity
+    guid: 66892274ae2c26a488239266f965bdb1
+  - enabled: 1
+    path: Assets/Scenes/Gameplay_Level2.unity
+    guid: 6478a3ff4a2c31c438249926e38c2b00
+  - enabled: 1
+    path: Assets/Scenes/Gameplay_Level3.unity
+    guid: c449999d835becf40953ec4707d0ca3d
   m_configObjects:
     com.unity.input.settings.actions: {fileID: -944628639613478452, guid: 052faaac586de48259a63d0c4782560b, type: 3}
   m_UseUCBPForAssetBundles: 0
