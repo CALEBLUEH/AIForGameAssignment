@@ -196,8 +196,13 @@ public static class FinalGameplayIntegrationPlayModeSmoke
             GameProgress.BattleSceneForLevel(2) != "Gameplay_Level2" ||
             GameProgress.BattleSceneForLevel(3) != "Gameplay_Level3")
             throw new InvalidOperationException("Level routing still points at an old non-underscored gameplay scene.");
-        if (GameProgress.StarsForPlayerDeaths(0) != 3 || GameProgress.StarsForPlayerDeaths(1) != 2 ||
-            GameProgress.StarsForPlayerDeaths(2) != 1)
+        if (GameProgress.StarsForVictory(0, 100f) !=
+                (GameProgress.LevelStar.Completed | GameProgress.LevelStar.NoCharacterDefeated | GameProgress.LevelStar.UnderTwoMinutes) ||
+            GameProgress.StarsForVictory(1, 100f) !=
+                (GameProgress.LevelStar.Completed | GameProgress.LevelStar.UnderTwoMinutes) ||
+            GameProgress.StarsForVictory(0, 121f) !=
+                (GameProgress.LevelStar.Completed | GameProgress.LevelStar.NoCharacterDefeated) ||
+            GameProgress.StarsForVictory(1, 121f) != GameProgress.LevelStar.Completed)
             throw new InvalidOperationException("Victory star rules are incorrect.");
 
         int originalLevel = GameProgress.SelectedLevel;

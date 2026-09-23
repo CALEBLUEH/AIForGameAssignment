@@ -115,6 +115,10 @@ PrefabInstance:
       value: 7
       objectReference: {fileID: 0}
     - target: {fileID: 3614039678339281282, guid: f706a552ec8bd844a852047d483b9868, type: 3}
+      propertyPath: knockbackDuration
+      value: 0.75
+      objectReference: {fileID: 0}
+    - target: {fileID: 3614039678339281282, guid: f706a552ec8bd844a852047d483b9868, type: 3}
       propertyPath: enemyDetectionRange
       value: 18
       objectReference: {fileID: 0}

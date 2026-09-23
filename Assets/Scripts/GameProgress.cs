@@ -3,6 +3,15 @@ using UnityEngine;
 
 public static class GameProgress
 {
+    [System.Flags]
+    public enum LevelStar
+    {
+        None = 0,
+        Completed = 1 << 0,
+        NoCharacterDefeated = 1 << 1,
+        UnderTwoMinutes = 1 << 2
+    }
+
     private const string UnlockedLevelKey = "AIFG.UnlockedLevel";
     private const string SelectedLevelKey = "AIFG.SelectedLevel";
     private const string SelectedCharactersKey = "AIFG.SelectedCharacters";
@@ -46,19 +55,64 @@ public static class GameProgress
         return SelectedBattleScene;
     }
 
-    public static int StarsForPlayerDeaths(int playerDeaths) => playerDeaths <= 0 ? 3 : playerDeaths == 1 ? 2 : 1;
     public static bool IsLevelUnlocked(int level) => level <= UnlockedLevel;
-    public static int GetStars(int level) => Mathf.Clamp(PlayerPrefs.GetInt("AIFG.LevelStars." + level, 0), 0, 3);
+    public static int GetStars(int level) => CountStars(GetStarFlags(level));
 
-    public static void CompleteLevel(int level, int stars)
+    public static LevelStar GetStarFlags(int level)
     {
         level = Mathf.Clamp(level, 1, 3);
-        stars = Mathf.Clamp(stars, 1, 3);
-        string key = "AIFG.LevelStars." + level;
-        if (stars > PlayerPrefs.GetInt(key, 0)) PlayerPrefs.SetInt(key, stars);
+        string flagsKey = StarFlagsKey(level);
+        if (PlayerPrefs.HasKey(flagsKey))
+            return (LevelStar)(PlayerPrefs.GetInt(flagsKey, 0) & (int)AllStars);
+
+        // Previous builds saved only a one-to-three count based on casualties. That
+        // value cannot prove the new optional conditions, but it does prove a victory.
+        return PlayerPrefs.GetInt(LegacyStarsKey(level), 0) > 0 ? LevelStar.Completed : LevelStar.None;
+    }
+
+    public static bool HasStar(int level, LevelStar star) => (GetStarFlags(level) & star) == star;
+
+    public static LevelStar StarsForVictory(int playerDeaths, float completionSeconds)
+    {
+        LevelStar earned = LevelStar.Completed;
+        if (playerDeaths <= 0) earned |= LevelStar.NoCharacterDefeated;
+        if (completionSeconds <= 120f) earned |= LevelStar.UnderTwoMinutes;
+        return earned;
+    }
+
+    public static int CountStars(LevelStar stars)
+    {
+        int value = (int)stars & (int)AllStars;
+        int count = 0;
+        while (value != 0) { count += value & 1; value >>= 1; }
+        return count;
+    }
+
+    public static LevelStar CompleteLevel(int level, int playerDeaths, float completionSeconds)
+    {
+        level = Mathf.Clamp(level, 1, 3);
+        LevelStar earned = StarsForVictory(playerDeaths, completionSeconds);
+        LevelStar combined = GetStarFlags(level) | earned;
+        PlayerPrefs.SetInt(StarFlagsKey(level), (int)combined);
+        PlayerPrefs.DeleteKey(LegacyStarsKey(level));
         if (level < 3 && UnlockedLevel < level + 1) PlayerPrefs.SetInt(UnlockedLevelKey, level + 1);
         PlayerPrefs.Save();
+        return earned;
     }
+
+    public static void ResetAllStars()
+    {
+        for (int level = 1; level <= 3; level++)
+        {
+            PlayerPrefs.DeleteKey(StarFlagsKey(level));
+            PlayerPrefs.DeleteKey(LegacyStarsKey(level));
+        }
+        PlayerPrefs.Save();
+    }
+
+    private const LevelStar AllStars = LevelStar.Completed | LevelStar.NoCharacterDefeated | LevelStar.UnderTwoMinutes;
+    private static string StarFlagsKey(int level) => "AIFG.LevelStarFlags." + level;
+    private static string LegacyStarsKey(int level) => "AIFG.LevelStars." + level;
 
     public static string[] GetSelectedCharacters()
     {

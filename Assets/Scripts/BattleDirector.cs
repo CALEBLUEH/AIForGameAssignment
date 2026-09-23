@@ -1480,12 +1480,13 @@ public class BattleDirector : MonoBehaviour
         isPlaying = false;
         ExitTargeting();
         Time.timeScale = 1f;
-        int stars = GameProgress.StarsForPlayerDeaths(playerDeaths);
-        if (won) GameProgress.CompleteLevel(levelNumber, stars);
-        StartCoroutine(ShowResultAfterDelay(won, stars));
+        GameProgress.LevelStar earnedStars = won
+            ? GameProgress.CompleteLevel(levelNumber, playerDeaths, elapsed)
+            : GameProgress.LevelStar.None;
+        StartCoroutine(ShowResultAfterDelay(won, earnedStars));
     }
 
-    private IEnumerator ShowResultAfterDelay(bool won, int stars)
+    private IEnumerator ShowResultAfterDelay(bool won, GameProgress.LevelStar earnedStars)
     {
         if (resultPanel != null) resultPanel.SetActive(false);
         yield return new WaitForSecondsRealtime(Mathf.Max(0f, resultDelay));
@@ -1495,10 +1496,15 @@ public class BattleDirector : MonoBehaviour
             resultText.color = won ? victoryTitleColor : defeatTitleColor;
         }
         if (resultDetailsText != null)
+        {
+            int stars = GameProgress.CountStars(earnedStars);
             resultDetailsText.text = won
                 ? new string('★', stars) + new string('☆', 3 - stars) + "\n" + playerDeaths +
-                  " deployed character" + (playerDeaths == 1 ? "" : "s") + " lost"
+                  " deployed character" + (playerDeaths == 1 ? "" : "s") + " lost\n" +
+                  (elapsed <= 120f ? "Cleared within 2 minutes" : "Clear time: " +
+                    Mathf.FloorToInt(elapsed / 60f).ToString("00") + ":" + Mathf.FloorToInt(elapsed % 60f).ToString("00"))
                 : "Your squad has fallen.";
+        }
         if (resultPanel == null) yield break;
         resultPanel.SetActive(true);
         if (resultCanvasGroup == null) yield break;

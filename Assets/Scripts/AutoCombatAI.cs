@@ -6,6 +6,10 @@ using UnityEngine.AI;
 [RequireComponent(typeof(CombatUnit))]
 public class AutoCombatAI : MonoBehaviour
 {
+    private const float DefaultClosestTargetRefreshInterval = 5f;
+    private const float DefaultKnockbackDuration = 0.75f;
+    private const float DefaultKnockbackDistance = 2.25f;
+    private const float DefaultKnockbackSpeedMultiplier = 1.45f;
     public enum MovementKind { Charge, Dash, Flash }
     public enum CharacterSkillKind { PowerUp, Burst, Heal, Defensive, LowCostAOE, HighCostAOE }
     public enum CombatRole { Enemy, YuukaTank, AyaneHealer, MikaSingleTarget, MomoiLowCostAOE, HinaHighCostAOE }
@@ -94,6 +98,11 @@ public class AutoCombatAI : MonoBehaviour
     [Header("Automatic attack set")]
     public int basicAttacksBeforeFinisher = 2;
     public float finisherMultiplier = 1.5f;
+    [Header("Target refresh and knockback")]
+    [Min(0.1f)] [SerializeField] private float closestTargetRefreshInterval = 5f;
+    [Min(0.05f)] [SerializeField] private float knockbackDuration = 0.75f;
+    [Min(0.1f)] [SerializeField] private float knockbackDistance = 2.25f;
+    [Min(0.1f)] [SerializeField] private float knockbackSpeedMultiplier = 1.45f;
 
     [SerializeField] private CombatUnit currentTarget;
     [SerializeField] private string currentState = "Waiting";
@@ -101,7 +110,9 @@ public class AutoCombatAI : MonoBehaviour
     private SquadMember member;
     private NavMeshPath path;
     private int corner, actionIndex, enemyAbilityCycle;
-    private float nextAttack, nextSearch, nextPath, nextAutoDecision;
+    private float nextAttack, nextSearch, nextPath, nextAutoDecision, nextClosestTargetRefresh;
+    private float knockbackUntil;
+    private Vector3 knockbackDestination;
     private float movementReadyAt, characterSkillReadyAt, enemyAbilityReadyAt;
     private bool returning, skillMoving, skillCasting;
     private Vector3 skillDestination;
@@ -126,6 +137,7 @@ public class AutoCombatAI : MonoBehaviour
     public float CharacterCooldownRemaining => Mathf.Max(0f, characterSkillReadyAt - Time.time);
     public bool IsCastingSkill => skillCasting;
     public bool IsDashing => skillMoving;
+    public bool IsKnockedBack => Time.time < knockbackUntil;
     public CoverPoint ReservedCover => coverPoint;
     public bool IsOccupyingCover => coverPoint != null && coverOccupied;
     public float CoverOccupiedDuration => IsOccupyingCover ? Mathf.Max(0f, Time.time - coverReachedAt) : 0f;
@@ -137,6 +149,12 @@ public class AutoCombatAI : MonoBehaviour
         unit = GetComponent<CombatUnit>();
         member = GetComponent<SquadMember>();
         path = new NavMeshPath();
+        // Older prefabs/scenes may deserialize newly introduced fields as zero.
+        // Upgrade only invalid values and preserve every authored positive value.
+        if (closestTargetRefreshInterval <= 0f) closestTargetRefreshInterval = DefaultClosestTargetRefreshInterval;
+        if (knockbackDuration <= 0f) knockbackDuration = DefaultKnockbackDuration;
+        if (knockbackDistance <= 0f) knockbackDistance = DefaultKnockbackDistance;
+        if (knockbackSpeedMultiplier <= 0f) knockbackSpeedMultiplier = DefaultKnockbackSpeedMultiplier;
         runtimeGroundOffset = Mathf.Max(0f, groundOffset);
         if (deriveGroundOffsetFromCollider && TryGetComponent(out Collider bodyCollider))
             runtimeGroundOffset = Mathf.Max(0f, transform.position.y - bodyCollider.bounds.min.y);
@@ -164,6 +182,7 @@ public class AutoCombatAI : MonoBehaviour
         enemyAggro = true;
         currentTarget = null;
         nextSearch = 0f;
+        nextClosestTargetRefresh = 0f;
         nextPath = 0f;
         ClearPath();
     }
@@ -184,6 +203,7 @@ public class AutoCombatAI : MonoBehaviour
     {
         if (unit.IsDead) { currentState = "Down"; return; }
         if (BattleDirector.Instance != null && !BattleDirector.Instance.IsPlaying) return;
+        if (UpdateKnockback()) return;
         if (skillCasting)
         {
             ClearPath();
@@ -212,8 +232,13 @@ public class AutoCombatAI : MonoBehaviour
             return;
         }
         returning = false;
-        if (Time.time >= nextSearch || currentTarget == null || currentTarget.IsDead)
-        { FindTarget(); nextSearch = Time.time + targetSearchInterval; }
+        bool targetMissing = currentTarget == null || currentTarget.IsDead;
+        if ((targetMissing && Time.time >= nextSearch) || Time.time >= nextClosestTargetRefresh)
+        {
+            FindTarget();
+            nextSearch = Time.time + targetSearchInterval;
+            nextClosestTargetRefresh = Time.time + closestTargetRefreshInterval;
+        }
         if (currentTarget == null)
         {
             if (coverPoint != null && HandleCover()) return;
@@ -290,44 +315,85 @@ public class AutoCombatAI : MonoBehaviour
 
     private bool UpdateEnemyEngagement()
     {
-        CombatUnit nearestPlayer = null;
-        float nearestDistance = float.PositiveInfinity;
-
-        foreach (CombatUnit candidate in FindObjectsByType<CombatUnit>(FindObjectsSortMode.None))
-        {
-            if (candidate == null || candidate.IsDead || candidate.team == unit.team) continue;
-            float d = Distance(transform.position, candidate.transform.position);
-            if (d < nearestDistance)
-            {
-                nearestDistance = d;
-                nearestPlayer = candidate;
-            }
-        }
-
         // Before activation, stay in this wave position.
         if (!enemyAggro)
         {
-            if (nearestPlayer == null || nearestDistance > enemyDetectionRange)
+            if (Time.time >= nextSearch || currentTarget == null || currentTarget.IsDead)
             {
+                FindTarget();
+                nextSearch = Time.time + targetSearchInterval;
+            }
+            if (currentTarget == null || Distance(transform.position, currentTarget.transform.position) > enemyDetectionRange)
+            {
+                currentTarget = null;
                 ClearPath();
                 currentState = "Guarding";
                 return false;
             }
 
             enemyAggro = true;
+            nextClosestTargetRefresh = Time.time + closestTargetRefreshInterval;
         }
 
         // Once activated, never leash/return to the original area.
-        if (nearestPlayer == null)
+        if (currentTarget == null || currentTarget.IsDead)
         {
-            currentTarget = null;
+            FindTarget();
+            nextClosestTargetRefresh = Time.time + closestTargetRefreshInterval;
+        }
+
+        if (currentTarget == null)
+        {
             ClearPath();
             currentState = "No target";
             return false;
         }
-
-        currentTarget = nearestPlayer;
         enemyLastSeenTime = Time.time;
+        return true;
+    }
+
+    public void TriggerKnockback(Vector3 source)
+    {
+        if (unit == null || unit.IsDead) return;
+        Vector3 away = NavMeshWorldPosition - source;
+        away.y = 0f;
+        if (away.sqrMagnitude < 0.01f) away = -transform.forward;
+
+        Vector3 requested = NavMeshWorldPosition + away.normalized * knockbackDistance;
+        if (!TryResolveReachablePoint(requested, out knockbackDestination))
+        {
+            // A shorter retreat is preferable to teleporting or leaving the NavMesh.
+            requested = NavMeshWorldPosition + away.normalized * (knockbackDistance * 0.5f);
+            if (!TryResolveReachablePoint(requested, out knockbackDestination)) return;
+        }
+
+        ReleaseCover();
+        skillMoving = false;
+        ClearPath();
+        nextPath = 0f;
+        knockbackUntil = Time.time + knockbackDuration;
+        nextAttack = Mathf.Max(nextAttack, knockbackUntil);
+        currentState = "Fleeing from knockback";
+    }
+
+    private bool UpdateKnockback()
+    {
+        if (!IsKnockedBack) return false;
+        currentState = "Fleeing from knockback";
+        Navigate(knockbackDestination, 0.08f);
+        Move(movementSpeed * knockbackSpeedMultiplier, false);
+        return true;
+    }
+
+    private bool TryResolveReachablePoint(Vector3 requested, out Vector3 destination)
+    {
+        destination = NavMeshWorldPosition;
+        if (!NavMesh.SamplePosition(NavMeshProbe(transform.position), out NavMeshHit start, 2f, NavMesh.AllAreas) ||
+            !NavMesh.SamplePosition(requested, out NavMeshHit end, 2f, NavMesh.AllAreas)) return false;
+        var retreatPath = new NavMeshPath();
+        if (!NavMesh.CalculatePath(start.position, end.position, NavMesh.AllAreas, retreatPath) ||
+            retreatPath.status != NavMeshPathStatus.PathComplete) return false;
+        destination = end.position;
         return true;
     }
 

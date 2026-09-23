@@ -154,19 +154,21 @@ public class CombatUnit : MonoBehaviour
             UnitDied?.Invoke(this);
             Destroy(gameObject, 1.1f);
         }
-        else if (++hitsTaken >= Mathf.Max(1, Mathf.RoundToInt(resistance)))
+        else if (appliedDamage > 0f && ++hitsTaken >= Mathf.Max(1, Mathf.RoundToInt(resistance)))
         {
             hitsTaken = 0;
-            Vector3 retreat = transform.position - source;
-            retreat.y = 0f;
-            if (retreat.sqrMagnitude > 0.01f)
+            AutoCombatAI navigation = GetComponent<AutoCombatAI>();
+            if (navigation != null)
+                navigation.TriggerKnockback(source);
+            else
             {
-                Vector3 destination = transform.position + retreat.normalized * 0.8f;
-                if (UnityEngine.AI.NavMesh.SamplePosition(destination, out var hit, 1f, UnityEngine.AI.NavMesh.AllAreas))
+                Vector3 retreat = transform.position - source;
+                retreat.y = 0f;
+                if (retreat.sqrMagnitude > 0.01f)
                 {
-                    AutoCombatAI navigation = GetComponent<AutoCombatAI>();
-                    if (navigation != null) navigation.SetNavMeshPosition(hit.position);
-                    else transform.position = hit.position;
+                    Vector3 destination = transform.position + retreat.normalized * 0.8f;
+                    if (UnityEngine.AI.NavMesh.SamplePosition(destination, out var hit, 1f, UnityEngine.AI.NavMesh.AllAreas))
+                        transform.position = hit.position;
                 }
             }
         }

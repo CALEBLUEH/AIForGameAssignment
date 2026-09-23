@@ -41,7 +41,7 @@ public sealed class CombatAnimationDriver : MonoBehaviour
         if (ContainsAny(state, "attack", "attacking", "skill", "finisher", "auto skill", "status ability", "fighting from cover"))
             return "Attack";
         if (ContainsAny(state, "pursuing", "advancing", "returning", "repositioning", "avoiding", "taking cover",
-            "leaving", "reserved", "charge", "dash", "flashed"))
+            "leaving", "reserved", "charge", "dash", "flashed", "fleeing", "knockback"))
             return "Run";
         return "Idle";
     }
