@@ -29,7 +29,8 @@ public static class SandboxCoverCinematicSetup
         Scene scene = EditorSceneManager.OpenScene(ScenePath, OpenSceneMode.Single);
         RectSnapshot[] existingRects = scene.GetRootGameObjects()
             .SelectMany(root => root.GetComponentsInChildren<RectTransform>(true))
-            .Where(rect => rect.name != HealthHudName && rect.GetComponentInParent<CoverHealthHUD>() == null &&
+            .Where(rect => !IsObstacleHudRect(rect) && rect.GetComponentInParent<CoverHealthHUD>() == null &&
+                rect.GetComponentInParent<DestructibleCover>() == null &&
                 rect.GetComponentInParent<SkillCinematicPlayer>() == null)
             .Select(rect => new RectSnapshot(rect)).ToArray();
 
@@ -56,13 +57,23 @@ public static class SandboxCoverCinematicSetup
         Debug.Log($"SANDBOX_COVER_CINEMATIC_SETUP_OK obstacles={configuredObjects.Count}, capacity=1, health HUDs and five skill videos wired without moving existing UI.");
     }
 
+    private static bool IsObstacleHudRect(RectTransform rect)
+    {
+        for (Transform current = rect; current != null; current = current.parent)
+            if (current.name == HealthHudName) return true;
+        return false;
+    }
+
     private static void ConfigureSceneObstacle(GameObject obstacle, Collider collider)
     {
         TacticalCoverObstacle tactical = GetOrAdd<TacticalCoverObstacle>(obstacle);
+        tactical.enabled = true;
         tactical.ConfigureCapacity(1);
         DestructibleCover health = GetOrAdd<DestructibleCover>(obstacle);
+        health.enabled = true;
         if (health.MaxHealth <= 1f) health.Configure(180f);
         BlockingObstacle blocker = GetOrAdd<BlockingObstacle>(obstacle);
+        blocker.enabled = true;
         blocker.blocksLineOfSight = true;
 
         CoverPoint[] points = obstacle.GetComponentsInChildren<CoverPoint>(true);
@@ -118,9 +129,11 @@ public static class SandboxCoverCinematicSetup
                 box.size = bounds.size;
                 collider = box;
             }
-            TacticalCoverObstacle tactical = GetOrAdd<TacticalCoverObstacle>(root);
+        TacticalCoverObstacle tactical = GetOrAdd<TacticalCoverObstacle>(root);
+        tactical.enabled = true;
             tactical.ConfigureCapacity(1);
-            DestructibleCover health = GetOrAdd<DestructibleCover>(root);
+        DestructibleCover health = GetOrAdd<DestructibleCover>(root);
+        health.enabled = true;
             health.Configure(180f);
             GetOrAdd<BlockingObstacle>(root).blocksLineOfSight = true;
             EnsureHealthHud(root, health, collider == null ? RendererBounds(root) : collider.bounds);
@@ -136,6 +149,7 @@ public static class SandboxCoverCinematicSetup
             ? new GameObject(HealthHudName, typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler), typeof(CoverHealthHUD))
             : existing.gameObject;
         hudObject.transform.SetParent(obstacle.transform, true);
+        hudObject.SetActive(true);
         hudObject.transform.position = new Vector3(bounds.center.x, bounds.max.y + 0.65f, bounds.center.z);
         hudObject.transform.rotation = Quaternion.identity;
         hudObject.transform.localScale = Vector3.one * 0.01f;
@@ -308,7 +322,8 @@ public static class SandboxCoverCinematicSetup
             if (rect == null || rect.anchorMin != anchorMin || rect.anchorMax != anchorMax || rect.pivot != pivot ||
                 rect.anchoredPosition != anchoredPosition || rect.sizeDelta != sizeDelta ||
                 rect.localPosition != localPosition || rect.localScale != localScale || rect.localRotation != localRotation)
-                throw new InvalidOperationException("Existing UI transform changed: " + (rect == null ? "missing" : rect.name));
+                throw new InvalidOperationException("Existing UI transform changed: " + (rect == null ? "missing" :
+                    AnimationUtility.CalculateTransformPath(rect, null)));
         }
     }
 }

@@ -88,11 +88,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 3571022773601004427, guid: f706a552ec8bd844a852047d483b9868, type: 3}
       propertyPath: attackPower
-      value: 40
-      objectReference: {fileID: 0}
-    - target: {fileID: 3571022773601004427, guid: f706a552ec8bd844a852047d483b9868, type: 3}
-      propertyPath: attackRange
-      value: 40
+      value: 11
       objectReference: {fileID: 0}
     - target: {fileID: 3571022773601004427, guid: f706a552ec8bd844a852047d483b9868, type: 3}
       propertyPath: applyCharacterDataOnAwake
@@ -119,32 +115,8 @@ PrefabInstance:
       value: 7
       objectReference: {fileID: 0}
     - target: {fileID: 3614039678339281282, guid: f706a552ec8bd844a852047d483b9868, type: 3}
-      propertyPath: rotationSpeed
-      value: 8
-      objectReference: {fileID: 0}
-    - target: {fileID: 3614039678339281282, guid: f706a552ec8bd844a852047d483b9868, type: 3}
-      propertyPath: separationDistance
-      value: 15
-      objectReference: {fileID: 0}
-    - target: {fileID: 3614039678339281282, guid: f706a552ec8bd844a852047d483b9868, type: 3}
-      propertyPath: separationStrength
-      value: 10
-      objectReference: {fileID: 0}
-    - target: {fileID: 3614039678339281282, guid: f706a552ec8bd844a852047d483b9868, type: 3}
       propertyPath: enemyDetectionRange
       value: 18
-      objectReference: {fileID: 0}
-    - target: {fileID: 8849057258022740176, guid: f706a552ec8bd844a852047d483b9868, type: 3}
-      propertyPath: m_LocalScale.x
-      value: 4
-      objectReference: {fileID: 0}
-    - target: {fileID: 8849057258022740176, guid: f706a552ec8bd844a852047d483b9868, type: 3}
-      propertyPath: m_LocalScale.y
-      value: 4
-      objectReference: {fileID: 0}
-    - target: {fileID: 8849057258022740176, guid: f706a552ec8bd844a852047d483b9868, type: 3}
-      propertyPath: m_LocalScale.z
-      value: 4
       objectReference: {fileID: 0}
     - target: {fileID: 8849057258022740176, guid: f706a552ec8bd844a852047d483b9868, type: 3}
       propertyPath: m_LocalPosition.x
@@ -185,10 +157,6 @@ PrefabInstance:
     - target: {fileID: 8849057258022740176, guid: f706a552ec8bd844a852047d483b9868, type: 3}
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 8849057258022740176, guid: f706a552ec8bd844a852047d483b9868, type: 3}
-      propertyPath: m_ConstrainProportionsScale
-      value: 1
       objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects:

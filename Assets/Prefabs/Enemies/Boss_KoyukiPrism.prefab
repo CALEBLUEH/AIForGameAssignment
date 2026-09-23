@@ -110,7 +110,7 @@ PrefabInstance:
     m_AddedGameObjects:
     - targetCorrespondingSourceObject: {fileID: 8849057258022740176, guid: f706a552ec8bd844a852047d483b9868, type: 3}
       insertIndex: -1
-      addedObject: {fileID: 6685386794857842657}
+      addedObject: {fileID: 850028049240673570}
     m_AddedComponents:
     - targetCorrespondingSourceObject: {fileID: 312170708147662011, guid: f706a552ec8bd844a852047d483b9868, type: 3}
       insertIndex: -1
@@ -134,7 +134,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::EnemyAttackRecoil
   combatAI: {fileID: 3272885686054710172}
-  visualRoot: {fileID: 6685386794857842657}
+  visualRoot: {fileID: 850028049240673570}
   recoilDistance: 0.16
   recoilAngle: 5
   recoilDuration: 0.18
@@ -211,7 +211,7 @@ PrefabInstance:
     m_AddedGameObjects: []
     m_AddedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: 07c87fce962ab8e48b04599e56d5f914, type: 3}
---- !u!4 &6685386794857842657 stripped
+--- !u!4 &850028049240673570 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 4867060917399117311, guid: 07c87fce962ab8e48b04599e56d5f914, type: 3}
   m_PrefabInstance: {fileID: 5206352620861067485}

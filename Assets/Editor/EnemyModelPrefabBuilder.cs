@@ -165,6 +165,7 @@ public static class EnemyModelPrefabBuilder
         ai.separationDistance = Mathf.Max(2f, radius * 2.2f);
         ai.separationStrength = 1f;
         ai.enemyDetectionRange = spec.boss ? 24f : 18f;
+        ai.enemyCanUseCover = spec.sourceFolder == "Sensei";
 
         EnemyAttackRecoil recoil = root.GetComponent<EnemyAttackRecoil>();
         if (recoil == null) recoil = root.AddComponent<EnemyAttackRecoil>();

@@ -12,7 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 66c3fe1370215af4594bf6fab340159f, type: 3}
   m_Name: Ayame
   m_EditorClassIdentifier: Assembly-CSharp::CharacterData
-  maxHealth: 100
+  maxHealth: 10000
   attackPower: 20
   defense: 5
   attackRange: 8.24

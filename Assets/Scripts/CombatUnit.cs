@@ -35,6 +35,9 @@ public class CombatUnit : MonoBehaviour
     public float CurrentHealth => currentHealth;
     public float HealthRatio => currentHealth / Mathf.Max(1f, maxHealth);
     public float MovementPoints => movementPoints;
+    public float MovementPointCapacity => Mathf.Max(1f, skillPointCapacity);
+    public float MovementPointRatio => Mathf.Clamp01(movementPoints / MovementPointCapacity);
+    public bool IsMovementGaugeFull => movementPoints >= MovementPointCapacity - 0.01f;
     public float ShieldPoints => shieldExpiresAt > Time.time ? shieldPoints : 0f;
     public bool IsDead => isDead;
     public bool IsBoss => isBoss;
@@ -124,16 +127,18 @@ public class CombatUnit : MonoBehaviour
         if (isDead) return;
         float rawDamage = Mathf.Max(1f, attack - Defense);
         float protection = Mathf.Clamp01(coverProtection);
+        float appliedDamage = rawDamage;
 
-        // If the current cover has HP, the protected portion damages the cover instead.
+        // A valid occupied cover object takes the hit first. Damage only reaches the
+        // character when that hit breaks the remaining cover HP.
         if (activeCoverPoint != null && protection > 0f)
         {
-            DestructibleCover destructible = activeCoverPoint.GetComponentInParent<DestructibleCover>();
+            DestructibleCover destructible = activeCoverPoint.Destructible;
             if (destructible != null && !destructible.IsDestroyed)
-                destructible.TakeDamage(rawDamage * protection);
+                appliedDamage = destructible.AbsorbDamage(rawDamage);
+            else
+                appliedDamage = rawDamage * (1f - protection);
         }
-
-        float appliedDamage = rawDamage * (1f - protection);
         if (ShieldPoints > 0f)
         {
             float absorbed = Mathf.Min(shieldPoints, appliedDamage);

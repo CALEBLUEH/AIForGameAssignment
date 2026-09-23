@@ -114,6 +114,11 @@ public class BattleDirector : MonoBehaviour
     private enum TargetMode { None, Move, Skill }
     private TargetMode targetMode;
     private int targetingStartedFrame = -1;
+    [Header("Movement skill input")]
+    [Min(0.1f)] [SerializeField] private float movementDragCancelRadius = 0.8f;
+    [Min(8f)] [SerializeField] private float movementScreenPickRadius = 70f;
+    private bool movementDragActive;
+    private AutoCombatAI movementDragOwner;
     private SkillTargetHighlighter targetHighlighter;
     public bool IsPlaying => isPlaying;
     public float UniversalPoints => universalPoints;
@@ -376,8 +381,13 @@ public class BattleDirector : MonoBehaviour
             Finish(true);
             return;
         }
+        if (targetMode == TargetMode.None && Input.GetMouseButtonDown(0) && !IsPointerOverInteractiveUI())
+            TryBeginMovementDrag();
         UpdateTargetPointer();
-        if (targetMode == TargetMode.Move && Input.GetMouseButtonDown(0) && !IsPointerOverInteractiveUI())
+        if (targetMode == TargetMode.Move && movementDragActive && Input.GetMouseButtonUp(0))
+            FinishMovementDrag();
+        else if (targetMode == TargetMode.Move && !movementDragActive &&
+            Input.GetMouseButtonDown(0) && !IsPointerOverInteractiveUI())
             HandleWorldRelease();
         else if (targetMode == TargetMode.Skill && Input.GetMouseButtonUp(0) &&
             Time.frameCount > targetingStartedFrame && !IsPointerOverInteractiveUI())
@@ -813,6 +823,79 @@ public class BattleDirector : MonoBehaviour
         return used;
     }
 
+    private void TryBeginMovementDrag()
+    {
+        if (Camera.main == null) return;
+        Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
+        RaycastHit[] hits = Physics.RaycastAll(ray, 1000f, ~0, QueryTriggerInteraction.Ignore);
+        System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
+        foreach (RaycastHit hit in hits)
+        {
+            CombatUnit candidate = hit.collider.GetComponentInParent<CombatUnit>();
+            if (candidate == null || candidate.IsDead || candidate.team != CombatUnit.CombatTeam.Player ||
+                !candidate.IsMovementGaugeFull) continue;
+            AutoCombatAI ai = candidate.GetComponent<AutoCombatAI>();
+            int index = squad.IndexOf(ai);
+            if (index < 0 || !IsUsableSquadMember(index) || ai.IsDashing || ai.MovementCooldownRemaining > 0f)
+                continue;
+            SelectMember(index);
+            movementDragOwner = ai;
+            movementDragActive = true;
+            BeginTargeting(TargetMode.Move);
+            return;
+        }
+
+        // A unit pressed against cover can be completely hidden from the physics ray.
+        // Fall back to its visible screen-space bounds so the obstacle never traps input.
+        AutoCombatAI screenCandidate = FindMovementDragCandidateFromScreen(Input.mousePosition);
+        if (screenCandidate == null) return;
+        int selected = squad.IndexOf(screenCandidate);
+        SelectMember(selected);
+        movementDragOwner = screenCandidate;
+        movementDragActive = true;
+        BeginTargeting(TargetMode.Move);
+    }
+
+    private AutoCombatAI FindMovementDragCandidateFromScreen(Vector2 screenPoint)
+    {
+        if (Camera.main == null) return null;
+        AutoCombatAI screenCandidate = null;
+        float bestPixels = movementScreenPickRadius;
+        foreach (AutoCombatAI ai in squad)
+        {
+            if (ai == null || ai.Unit == null || ai.Unit.IsDead ||
+                ai.Unit.team != CombatUnit.CombatTeam.Player || !ai.Unit.IsMovementGaugeFull ||
+                ai.IsDashing || ai.MovementCooldownRemaining > 0f) continue;
+            int index = squad.IndexOf(ai);
+            if (index < 0 || !IsUsableSquadMember(index)) continue;
+            Collider body = ai.GetComponent<Collider>() ?? ai.GetComponentInChildren<Collider>(true);
+            Vector3 world = body == null ? ai.transform.position + Vector3.up : body.bounds.center;
+            Vector3 screen = Camera.main.WorldToScreenPoint(world);
+            if (screen.z <= 0f) continue;
+            float pixels = Vector2.Distance(screenPoint, new Vector2(screen.x, screen.y));
+            if (pixels >= bestPixels) continue;
+            bestPixels = pixels;
+            screenCandidate = ai;
+        }
+        return screenCandidate;
+    }
+
+    private void FinishMovementDrag()
+    {
+        if (!movementDragActive || movementDragOwner == null || targetingFeedback == null)
+        {
+            ExitTargeting();
+            return;
+        }
+        Vector3 pointer = targetingFeedback.Pointer;
+        if (FlatDistance(movementDragOwner.NavMeshWorldPosition, pointer) <= movementDragCancelRadius)
+        {
+            ExitTargeting();
+            return;
+        }
+        ResolveTargetAt(pointer);
+    }
+
     private bool TryResolveBasicSkill(QueuedSkillKind kind, Vector3 pointer, out Vector3 feedbackPosition)
     {
         feedbackPosition = pointer;
@@ -848,10 +931,17 @@ public class BattleDirector : MonoBehaviour
                     SkillVfx.SpawnBurst(landingPoint + Vector3.up * 0.25f,
                         new Color(1f, 0.42f, 0.12f), airstrikeParticleSize, 55, 1.1f,
                         airstrikeParticleRadius);
+                    HashSet<DestructibleCover> hitCovers =
+                        DestructibleCover.DamageInRadius(landingPoint, airstrikeRadius, airstrikeDamage);
                     foreach (CombatUnit enemy in FindObjectsByType<CombatUnit>(FindObjectsSortMode.None))
                         if (!enemy.IsDead && enemy.team == CombatUnit.CombatTeam.Enemy &&
                             FlatDistance(landingPoint, enemy.transform.position) <= airstrikeRadius)
+                        {
+                            DestructibleCover enemyCover = enemy.ActiveCoverPoint == null
+                                ? null : enemy.ActiveCoverPoint.Destructible;
+                            if (enemyCover != null && hitCovers.Contains(enemyCover)) continue;
                             enemy.TakeDamage(airstrikeDamage, landingPoint);
+                        }
                 });
             return true;
         }
@@ -913,18 +1003,33 @@ public class BattleDirector : MonoBehaviour
         DestructibleCover destructible = cover.GetComponent<DestructibleCover>();
         if (destructible == null) destructible = cover.AddComponent<DestructibleCover>();
         destructible.Configure(placedCoverHealth);
+        destructible.enabled = true;
         TacticalCoverObstacle group = cover.GetComponent<TacticalCoverObstacle>();
         if (group == null) group = cover.AddComponent<TacticalCoverObstacle>();
+        group.enabled = true;
 
-        Vector3 playerSide = position + rotation * Vector3.back * 0.85f;
-        Vector3 right = rotation * Vector3.right;
-        for (int i = -1; i <= 1; i++)
+        CoverPoint[] authoredPoints = cover.GetComponentsInChildren<CoverPoint>(true);
+        if (authoredPoints.Length > 0)
         {
-            GameObject pointObject = new GameObject("Placed Cover Point " + (i + 2));
-            pointObject.transform.SetParent(cover.transform, true);
-            pointObject.transform.position = playerSide + right * (i * 0.75f);
-            CoverPoint point = pointObject.AddComponent<CoverPoint>();
-            point.Configure(physicalCollider, group, 0.35f, 0.45f);
+            foreach (CoverPoint point in authoredPoints)
+                point.Configure(physicalCollider, group, 1f, 0.45f);
+        }
+        else
+        {
+            for (int side = -1; side <= 1; side += 2)
+            {
+                GameObject pointObject = new GameObject(side < 0 ? "Cover Point A" : "Cover Point B");
+                pointObject.transform.SetParent(cover.transform, true);
+                pointObject.transform.position = position + rotation * Vector3.forward * (side * 0.85f);
+                CoverPoint point = pointObject.AddComponent<CoverPoint>();
+                point.Configure(physicalCollider, group, 1f, 0.45f);
+            }
+        }
+        CoverHealthHUD hud = cover.GetComponentInChildren<CoverHealthHUD>(true);
+        if (hud != null)
+        {
+            hud.gameObject.SetActive(true);
+            hud.enabled = true;
         }
         SkillVfx.SpawnBurst(position + Vector3.up * 0.2f, new Color(0.3f, 0.75f, 1f), 0.3f, 28, 0.75f);
     }
@@ -982,14 +1087,15 @@ public class BattleDirector : MonoBehaviour
     private void BeginTargeting(TargetMode mode)
     {
         if (Selected == null || Selected.Unit.IsDead) return;
-        if (mode == TargetMode.Move && Selected.MovementCooldownRemaining > 0f) return;
+        if (mode == TargetMode.Move && (Selected.MovementCooldownRemaining > 0f ||
+            Selected.IsDashing || !Selected.Unit.IsMovementGaugeFull)) return;
         bool targetsBasicSkill = mode == TargetMode.Skill && activeQueuedSkill != null &&
             activeQueuedSkill.kind != QueuedSkillKind.Character;
         if (mode == TargetMode.Skill && !targetsBasicSkill && Selected.CharacterCooldownRemaining > 0f) return;
         if (targetsBasicSkill && !IsQueuedSkillUsable(activeQueuedSkill)) return;
         targetMode = mode;
         targetingStartedFrame = Time.frameCount;
-        Time.timeScale = mode == TargetMode.Skill ? skillTargetingTimeScale : 0.12f;
+        Time.timeScale = skillTargetingTimeScale;
         if (mode == TargetMode.Skill && targetingOverlay != null)
         {
             if (targetsBasicSkill) targetingOverlay.Show(NameFor(activeQueuedSkill), BasicSkillDescription(activeQueuedSkill.kind));
@@ -1025,6 +1131,8 @@ public class BattleDirector : MonoBehaviour
     private void ExitTargeting()
     {
         targetMode = TargetMode.None;
+        movementDragActive = false;
+        movementDragOwner = null;
         activeQueuedSkill = null;
         if (targetingFeedback != null) targetingFeedback.Hide();
         if (targetingOverlay != null) targetingOverlay.Hide();
@@ -1136,10 +1244,10 @@ public class BattleDirector : MonoBehaviour
                 "  Move " + Mathf.FloorToInt(unit.MovementPoints) + "/" + unit.skillPointCapacity +
                 "  •  " + selectedMember.CurrentState +
                 (targetMode == TargetMode.None ? "" : "  •  " +
-                    (targetMode == TargetMode.Move ? "Click a move position" :
+                    (targetMode == TargetMode.Move ? "Drag to a dash position" :
                     selectedMember.characterSkillKind == AutoCombatAI.CharacterSkillKind.PowerUp ? "Click to activate" : "Click near a target"));
             RefreshCooldown(moveCooldownOverlay, moveCooldownText, moveButton,
-                selectedMember.MovementCooldownRemaining, unit.MovementPoints >= selectedMember.movementCost);
+                selectedMember.MovementCooldownRemaining, unit.IsMovementGaugeFull);
             if (!UsesSkillQueue)
                 RefreshCooldown(skillCooldownOverlay, skillCooldownText, skillButton,
                     selectedMember.CharacterCooldownRemaining, universalPoints >= selectedMember.characterSkillCost);

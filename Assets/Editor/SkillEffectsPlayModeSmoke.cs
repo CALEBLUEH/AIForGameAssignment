@@ -125,8 +125,10 @@ public static class SkillEffectsPlayModeSmoke
         GameObject cover = Object.FindObjectsByType<GameObject>(FindObjectsSortMode.None)
             .FirstOrDefault(item => item.name == "Placed Cover" && Vector3.Distance(item.transform.position, coverPoint) < 1f);
         if (cover == null || cover.GetComponent<NavMeshObstacle>() == null ||
-            cover.GetComponent<TacticalCoverObstacle>() == null || cover.GetComponentsInChildren<CoverPoint>().Length != 3)
-            throw new InvalidOperationException("Dropped cover was not configured as a carved tactical obstacle with three cover points.");
+            cover.GetComponent<TacticalCoverObstacle>() == null || cover.GetComponent<DestructibleCover>() == null ||
+            cover.GetComponentInChildren<CoverHealthHUD>(true) == null ||
+            cover.GetComponentsInChildren<CoverPoint>().Length != 2)
+            throw new InvalidOperationException("Dropped cover was not configured as a carved destructible obstacle with HUD and two opposing cover points.");
         Debug.Log("SKILL_EFFECTS_PLAYMODE_OK basic Heal/Buff/Airstrike/Cover, FIFO inclusion, timed buff expiry, tactical dropped cover, and undimmed target cutout passed.");
         SessionState.SetInt(PhaseKey, 99);
         EditorApplication.isPlaying = false;

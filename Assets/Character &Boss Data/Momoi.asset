@@ -12,10 +12,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 66c3fe1370215af4594bf6fab340159f, type: 3}
   m_Name: Momoi
   m_EditorClassIdentifier: Assembly-CSharp::CharacterData
-  maxHealth: 105
-  attackPower: 22
+  maxHealth: 10000
+  attackPower: 1
   defense: 5
-  attackRange: 8.24
+  attackRange: 50
   attackSpeed: 1
   resistance: 3
   skillPointRegeneration: 7

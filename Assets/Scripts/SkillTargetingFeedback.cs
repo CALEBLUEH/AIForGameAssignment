@@ -120,6 +120,7 @@ public class SkillTargetingFeedback : MonoBehaviour
             ? origin + Vector3.ClampMagnitude(delta, Mathf.Max(0.1f, castRange))
             : worldPosition;
         if (NavMesh.SamplePosition(pointer, out NavMeshHit hit, 4f, NavMesh.AllAreas)) pointer = hit.position;
+        if (shape == Shape.Arrow && skillOwner != null) pointer = skillOwner.ResolveDashDestination(pointer);
     }
 
     public void Hide()
@@ -203,15 +204,24 @@ public class SkillTargetingFeedback : MonoBehaviour
         Vector3 origin = SourceGroundPosition();
         Vector3 delta = pointer - origin;
         delta.y = 0f;
-        Vector3 end = origin + Vector3.ClampMagnitude(delta, radius);
+        Vector3 end = skillOwner == null
+            ? origin + Vector3.ClampMagnitude(delta, radius)
+            : skillOwner.ResolveDashDestination(pointer);
         Vector3 start = Project(origin) + Vector3.up * 0.17f;
         end = Project(end) + Vector3.up * 0.17f;
-        arrowRenderer.positionCount = 3;
-        arrowRenderer.SetPosition(0, start);
-        arrowRenderer.SetPosition(1, end);
         Vector3 travel = end - start;
-        Vector3 side = travel.sqrMagnitude < 0.01f ? Vector3.right : Vector3.Cross(Vector3.up, travel.normalized) * 0.45f;
-        arrowRenderer.SetPosition(2, end - travel.normalized * 0.85f + side);
+        Vector3 direction = travel.sqrMagnitude < 0.01f ? Vector3.forward : travel.normalized;
+        Vector3 side = Vector3.Cross(Vector3.up, direction);
+        float headLength = Mathf.Min(1.5f, Mathf.Max(0.65f, travel.magnitude * 0.3f));
+        float headWidth = Mathf.Min(1.0f, Mathf.Max(0.5f, travel.magnitude * 0.18f));
+        Vector3 headBase = end - direction * headLength;
+        arrowRenderer.positionCount = 6;
+        arrowRenderer.SetPosition(0, start);
+        arrowRenderer.SetPosition(1, headBase);
+        arrowRenderer.SetPosition(2, headBase + side * headWidth);
+        arrowRenderer.SetPosition(3, end);
+        arrowRenderer.SetPosition(4, headBase - side * headWidth);
+        arrowRenderer.SetPosition(5, headBase);
     }
 
     private Vector3 SourceGroundPosition() => useWorldSource

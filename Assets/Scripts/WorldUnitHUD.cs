@@ -6,13 +6,17 @@ public class WorldUnitHUD : MonoBehaviour
     public CombatUnit unit;
     public Slider healthSlider;
     public Image healthFill;
+    [Header("Movement stamina")]
+    public Slider staminaSlider;
+    public Image staminaFill;
+    public Color staminaColor = new Color(1f, 0.48f, 0.05f, 1f);
     public Text unitName;
     public Text[] damageLabels;
     [Header("Status effects")]
     public StatusIconCatalog statusIconCatalog;
     public RectTransform statusContainer;
     public Image[] statusIcons;
-    public Color playerColor = new Color(0.12f, 0.78f, 1f, 1f);
+    public Color playerColor = new Color(0.12f, 0.85f, 0.25f, 1f);
     public Color enemyColor = new Color(1f, 0.22f, 0.18f, 1f);
     private float[] labelLives;
     private Vector2[] labelOrigins;
@@ -38,7 +42,11 @@ public class WorldUnitHUD : MonoBehaviour
         if (unitName != null) unitName.text = unit.name;
         if (healthFill != null) healthFill.color =
             unit.team == CombatUnit.CombatTeam.Player ? playerColor : enemyColor;
+        bool showStamina = unit.team == CombatUnit.CombatTeam.Player;
+        if (staminaSlider != null) staminaSlider.gameObject.SetActive(showStamina);
+        if (staminaFill != null) staminaFill.color = staminaColor;
         RefreshHealth();
+        RefreshStamina();
         RefreshStatuses();
     }
 
@@ -48,6 +56,7 @@ public class WorldUnitHUD : MonoBehaviour
         Camera camera = Camera.main;
         if (camera != null) transform.rotation = camera.transform.rotation;
         RefreshHealth();
+        RefreshStamina();
         if (shownStatusVersion != unit.StatusVersion) RefreshStatuses();
         for (int i = 0; i < labelLives.Length; i++)
         {
@@ -95,6 +104,13 @@ public class WorldUnitHUD : MonoBehaviour
         if (healthSlider == null || unit == null) return;
         healthSlider.maxValue = Mathf.Max(1f, unit.maxHealth);
         healthSlider.value = Mathf.Clamp(unit.CurrentHealth, 0f, unit.maxHealth);
+    }
+
+    private void RefreshStamina()
+    {
+        if (staminaSlider == null || unit == null) return;
+        staminaSlider.maxValue = unit.MovementPointCapacity;
+        staminaSlider.value = Mathf.Clamp(unit.MovementPoints, 0f, unit.MovementPointCapacity);
     }
 
     public void ShowDamage(float amount)

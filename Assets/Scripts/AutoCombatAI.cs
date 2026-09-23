@@ -20,6 +20,10 @@ public class AutoCombatAI : MonoBehaviour
     public float targetSearchInterval = 0.25f, pathUpdateInterval = 0.35f;
     public LayerMask sightBlockers;
     public float movementRange = 7f, movementCost = 35f, movementCooldown = 7f;
+    [Header("Dash")]
+    [Min(0.05f)] public float dashProbeRadius = 0.3f;
+    [Min(0.05f)] public float dashStopPadding = 0.45f;
+    [Min(0.1f)] public float dashGroundSampleRadius = 0.8f;
     [Header("NavMesh grounding")]
     [Tooltip("Keeps a capsule/model above the NavMesh instead of placing its body centre on the road.")]
     [SerializeField] private bool deriveGroundOffsetFromCollider = true;
@@ -30,6 +34,8 @@ public class AutoCombatAI : MonoBehaviour
     [Header("Cover")]
     [Tooltip("How strongly this character prefers usable cover. Yuuka/Tank should normally use Low; backline units can use High.")]
     public CoverPreference coverPreference = CoverPreference.Normal;
+    [Tooltip("Enemy-only permission. Keep disabled on every enemy except Sensei. Player characters ignore this field.")]
+    public bool enemyCanUseCover;
     [Tooltip("If enabled, this unit behaves as a frontline unit and will not take ordinary cover unless its health is at or below the threshold below.")]
     public bool frontlineUnit = false;
     [Range(0.05f, 1f)] public float frontlineCoverHealthThreshold = 0.40f;
@@ -118,6 +124,7 @@ public class AutoCombatAI : MonoBehaviour
     public float MovementCooldownRemaining => Mathf.Max(0f, movementReadyAt - Time.time);
     public float CharacterCooldownRemaining => Mathf.Max(0f, characterSkillReadyAt - Time.time);
     public bool IsCastingSkill => skillCasting;
+    public bool IsDashing => skillMoving;
     public CoverPoint ReservedCover => coverPoint;
     public bool IsOccupyingCover => coverPoint != null && coverOccupied;
     public float CoverOccupiedDuration => IsOccupyingCover ? Mathf.Max(0f, Time.time - coverReachedAt) : 0f;
@@ -184,22 +191,20 @@ public class AutoCombatAI : MonoBehaviour
         if (unit.team == CombatUnit.CombatTeam.Enemy && !UpdateEnemyEngagement()) return;
         if (skillMoving)
         {
-            Move(skillSpeed, false);
-            if (Distance(transform.position, skillDestination) < 0.25f || !HasPath())
-            { skillMoving = false; currentState = "Waiting"; }
+            UpdateDash();
             return;
         }
         // Auto toggle controls tactical decisions only. Basic combat AI must always run:
         // target acquisition, pursuit/repositioning, separation and basic attacks.
         bool tacticalAuto = unit.team != CombatUnit.CombatTeam.Player || BattleDirector.Instance == null ||
             BattleDirector.Instance.AutoEnabled;
-        // Valid cover has higher priority than formation return. The leader radius is a leash,
-        // not a command for everyone to stack on the leader's position.
-        bool hasReservedCover = coverPoint != null && coverPoint.IsReservedBy(unit);
-        if (!hasReservedCover && member != null && member.IsTooFarFromLeader() && Time.time >= nextAttack)
+        // Proposal hierarchy: finish the current attack section, then return to the
+        // squad before considering or keeping a cover reservation.
+        if (member != null && member.IsTooFarFromLeader() && Time.time >= nextAttack)
             returning = true;
         if (returning && member != null && !member.HasReturnedToLeader())
         {
+            ReleaseCover();
             currentState = "Returning";
             Navigate(member.leader.position, member.returnDistance);
             Move(movementSpeed, true);
@@ -436,6 +441,7 @@ public class AutoCombatAI : MonoBehaviour
 
     private bool ShouldUseCover()
     {
+        if (unit.team == CombatUnit.CombatTeam.Enemy && !enemyCanUseCover) return false;
         // Yuuka/tank NEVER uses cover. This does not depend on an Inspector checkbox.
         if (role == CombatRole.YuukaTank || frontlineUnit) return false;
         if (coverPreference == CoverPreference.Never) return false;
@@ -465,7 +471,7 @@ public class AutoCombatAI : MonoBehaviour
                 return false;
             }
 
-            if (!coverPoint.TryGetSafeStandPosition(out Vector3 standPosition))
+            if (!coverPoint.TryGetSafeStandPosition(unit, out Vector3 standPosition))
             {
                 RejectCurrentCover();
                 currentState = "Leaving unreachable cover";
@@ -508,7 +514,6 @@ public class AutoCombatAI : MonoBehaviour
             float enemyDistanceFromCover = currentTarget == null ? float.PositiveInfinity :
                 Distance(standPosition, currentTarget.transform.position);
             if (currentTarget == null || enemyDistanceFromCover > coverAttackRange ||
-                !coverPoint.ProtectsFrom(currentTarget.transform.position) ||
                 !HasSightFromCover(standPosition, currentTarget, coverPoint.coverCollider))
             {
                 CoverPoint abandoned = coverPoint;
@@ -520,7 +525,6 @@ public class AutoCombatAI : MonoBehaviour
 
             // COMMIT to this fighting position. Do not fall through into normal Pursuing logic.
             ClearPath();
-            ApplyIdleSeparation();
             Face(currentTarget.transform.position - transform.position);
             currentState = "Fighting from cover";
 
@@ -667,15 +671,13 @@ public class AutoCombatAI : MonoBehaviour
 
         CoverPoint targetCover = target.ActiveCoverPoint;
 
-        // IMPORTANT: occupied tactical cover is authoritative.
-        // If this CoverPoint says its barrier is between this attacker and the target,
-        // the attacker has NO line of sight. This avoids large bosses effectively
-        // seeing/shooting over the cover because of model size or ray height.
+        // An occupied tactical cover point remains attackable: the shot is aimed at
+        // the protected unit, then CombatUnit routes that damage into the cover HP.
         if (targetCover != null &&
             targetCover.coverCollider != null &&
             targetCover.ProtectsFrom(origin))
         {
-            return false;
+            return true;
         }
 
         foreach (var hit in hits)
@@ -885,27 +887,92 @@ public class AutoCombatAI : MonoBehaviour
 
     public bool TryMovementSkill(Vector3 destination)
     {
-        if (unit.IsDead || MovementCooldownRemaining > 0f || !unit.SpendMovementPoints(movementCost)) return false;
+        if (unit.IsDead || skillMoving || MovementCooldownRemaining > 0f || !unit.IsMovementGaugeFull) return false;
+        float staminaCost = unit.MovementPointCapacity;
+        if (!unit.SpendMovementPoints(staminaCost)) return false;
         ReleaseCover();
-        Vector3 groundOrigin = NavMeshWorldPosition;
-        Vector3 delta = destination - groundOrigin; delta.y = 0f;
-        destination = groundOrigin + Vector3.ClampMagnitude(delta, movementRange);
-        if (!NavMesh.SamplePosition(groundOrigin, out var start, 2f, NavMesh.AllAreas) ||
-            !NavMesh.SamplePosition(destination, out var hit, 3.5f, NavMesh.AllAreas))
-        { unit.RefundMovementPoints(movementCost); return false; }
-        if (movementKind == MovementKind.Flash)
-        {
-            SetNavMeshPosition(hit.position); ClearPath(); currentState = "Flashed";
-            movementReadyAt = Time.time + movementCooldown; return true;
-        }
-        var movementPath = new NavMeshPath();
-        if (!NavMesh.CalculatePath(start.position, hit.position, NavMesh.AllAreas, movementPath) ||
-            movementPath.status != NavMeshPathStatus.PathComplete || movementPath.corners.Length < 2)
-        { unit.RefundMovementPoints(movementCost); return false; }
-        path = movementPath; corner = 1; nextPath = Time.time + pathUpdateInterval;
-        skillDestination = hit.position; skillSpeed = movementKind == MovementKind.Charge ? 12f : 18f;
-        skillMoving = true; currentState = movementKind.ToString(); movementReadyAt = Time.time + movementCooldown;
+        Vector3 resolved = ResolveDashDestination(destination);
+        if (Distance(NavMeshWorldPosition, resolved) < 0.2f)
+        { unit.RefundMovementPoints(staminaCost); return false; }
+        ClearPath();
+        skillDestination = resolved;
+        skillSpeed = 18f;
+        skillMoving = true;
+        currentState = "Dash";
+        movementReadyAt = Time.time + movementCooldown;
         return true;
+    }
+
+    public Vector3 ResolveDashDestination(Vector3 requestedDestination)
+    {
+        Vector3 origin = NavMeshWorldPosition;
+        Vector3 delta = requestedDestination - origin;
+        delta.y = 0f;
+        float distance = Mathf.Min(delta.magnitude, Mathf.Max(0.1f, movementRange));
+        if (distance < 0.01f) return origin;
+        Vector3 direction = delta / delta.magnitude;
+
+        float allowedDistance = distance;
+        Vector3 castOrigin = origin + Vector3.up * Mathf.Max(0.35f, dashProbeRadius);
+        RaycastHit[] hits = Physics.SphereCastAll(castOrigin, dashProbeRadius, direction,
+            distance, ~0, QueryTriggerInteraction.Ignore);
+        System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
+        foreach (RaycastHit hit in hits)
+        {
+            if (hit.transform == transform || hit.transform.IsChildOf(transform)) continue;
+            bool isBlocker = hit.collider.GetComponentInParent<BlockingObstacle>() != null ||
+                hit.collider.GetComponentInParent<TacticalCoverObstacle>() != null ||
+                hit.collider.GetComponentInParent<DestructibleCover>() != null;
+            if (!isBlocker) continue;
+            allowedDistance = Mathf.Max(0f, hit.distance - dashStopPadding);
+            break;
+        }
+
+        Vector3 desired = origin + direction * allowedDistance;
+        if (NavMesh.SamplePosition(desired, out NavMeshHit hitPoint,
+                Mathf.Max(0.2f, dashGroundSampleRadius), NavMesh.AllAreas))
+            return hitPoint.position;
+        return origin;
+    }
+
+    private void UpdateDash()
+    {
+        Vector3 groundPosition = NavMeshWorldPosition;
+        Vector3 delta = skillDestination - groundPosition;
+        delta.y = 0f;
+        float remaining = delta.magnitude;
+        if (remaining <= 0.12f)
+        {
+            FinishDash();
+            return;
+        }
+
+        Vector3 direction = delta / remaining;
+        float step = Mathf.Min(remaining, skillSpeed * Time.deltaTime);
+        Vector3 candidate = groundPosition + direction * step;
+        if (!NavMesh.SamplePosition(candidate, out NavMeshHit hit,
+                Mathf.Max(0.2f, dashGroundSampleRadius), NavMesh.AllAreas))
+        {
+            FinishDash();
+            return;
+        }
+        Vector3 lateral = hit.position - candidate;
+        lateral.y = 0f;
+        if (lateral.magnitude > dashGroundSampleRadius)
+        {
+            FinishDash();
+            return;
+        }
+        SetNavMeshPosition(hit.position);
+        Face(direction);
+        if (step >= remaining - 0.01f) FinishDash();
+    }
+
+    private void FinishDash()
+    {
+        skillMoving = false;
+        currentState = "Waiting";
+        ClearPath();
     }
 
     public bool TryCharacterSkill(CombatUnit target)
@@ -974,7 +1041,12 @@ public class AutoCombatAI : MonoBehaviour
                         skillProjectileSpeed, skillRange, new Color(1f, 0.2f, 0.72f, 1f), false, () =>
                         {
                             if (target == null || target.IsDead) return;
-                            target.TakeDamage(unit.AttackPower * skillPowerMultiplier, transform.position);
+                            DestructibleCover targetCover = target.ActiveCoverPoint == null
+                                ? null : target.ActiveCoverPoint.Destructible;
+                            if (targetCover != null && !targetCover.IsDestroyed)
+                                targetCover.TakeDamage(unit.AttackPower * skillPowerMultiplier);
+                            else
+                                target.TakeDamage(unit.AttackPower * skillPowerMultiplier, transform.position);
                             target.ApplyStatus(primaryEffect);
                             SkillVfx.SpawnBurst(TargetCenter(target), new Color(1f, 0.22f, 0.72f, 1f), 0.55f, 38, 0.9f);
                         }, skillProjectileSize);
@@ -1030,9 +1102,13 @@ public class AutoCombatAI : MonoBehaviour
                 ? new Color(0.58f, 0.08f, 0.96f, 1f)
                 : new Color(1f, 0.48f, 0.34f, 1f);
             bool whiteCore = role == CombatRole.HinaHighCostAOE;
+            System.Collections.Generic.HashSet<DestructibleCover> hitCovers =
+                DestructibleCover.DamageInCone(origin, direction, skillRange, coneAngle, damagePerTick);
             foreach (CombatUnit enemy in FindObjectsByType<CombatUnit>(FindObjectsSortMode.None))
             {
                 if (enemy.IsDead || enemy.team == unit.team || !IsInsideCone(origin, direction, enemy.transform.position)) continue;
+                DestructibleCover enemyCover = enemy.ActiveCoverPoint == null ? null : enemy.ActiveCoverPoint.Destructible;
+                if (enemyCover != null && hitCovers.Contains(enemyCover)) continue;
                 enemy.TakeDamage(damagePerTick, transform.position);
                 if (tick == 0) enemy.ApplyStatus(primaryEffect);
             }

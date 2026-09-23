@@ -28,8 +28,9 @@ public sealed class TacticalCoverObstacle : MonoBehaviour
 
     private void OnDisable()
     {
-        foreach (CoverPoint point in GetComponentsInChildren<CoverPoint>(true))
-            if (point.Occupant != null) point.Release(point.Occupant);
+        foreach (CoverPoint point in CoverPoint.All.ToArray())
+            if (point != null && point.Obstacle == this && point.Occupant != null)
+                point.Release(point.Occupant);
         reservations.Clear();
     }
 
@@ -55,8 +56,9 @@ public sealed class TacticalCoverObstacle : MonoBehaviour
     public void AbandonFor(CombatUnit.CombatTeam team)
     {
         if (!abandonedTeams.Add(team)) return;
-        foreach (CoverPoint point in GetComponentsInChildren<CoverPoint>(true))
+        foreach (CoverPoint point in CoverPoint.All.ToArray())
         {
+            if (point == null || point.Obstacle != this) continue;
             CombatUnit occupant = point.Occupant;
             if (occupant != null && occupant.team == team) point.Release(occupant);
         }

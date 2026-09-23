@@ -10,7 +10,7 @@ public class CoverPoint : MonoBehaviour
     [Header("Usable Cover")]
     [Tooltip("The physical collider that must be between the enemy and this cover point.")]
     public Collider coverCollider;
-    [Range(0f, 0.95f)] public float protection = 0.35f;
+    [Range(0f, 1f)] public float protection = 1f;
     public float occupancyRadius = 0.45f;
     public float coverCheckHeight = 1.0f;
     [SerializeField] private TacticalCoverObstacle obstacle;
@@ -18,6 +18,9 @@ public class CoverPoint : MonoBehaviour
     public bool IsAvailable => occupant == null;
     public bool IsAbandoned => obstacle != null && obstacle.HasAnyAbandonedTeam;
     public TacticalCoverObstacle Obstacle => obstacle;
+    public DestructibleCover Destructible => obstacle != null
+        ? obstacle.GetComponent<DestructibleCover>() ?? obstacle.GetComponentInParent<DestructibleCover>()
+        : GetComponentInParent<DestructibleCover>();
     public CombatUnit Occupant => occupant;
     public bool IsReservedBy(CombatUnit unit) => occupant == unit;
     private CombatUnit occupant;
@@ -83,11 +86,14 @@ public class CoverPoint : MonoBehaviour
     {
         coverCollider = physicalCover;
         obstacle = owner;
-        protection = Mathf.Clamp(configuredProtection, 0f, 0.95f);
+        protection = Mathf.Clamp01(configuredProtection);
         occupancyRadius = Mathf.Max(0.1f, configuredOccupancyRadius);
     }
 
     public bool TryGetSafeStandPosition(out Vector3 position)
+        => TryGetSafeStandPosition(null, out position);
+
+    public bool TryGetSafeStandPosition(CombatUnit unit, out Vector3 position)
     {
         position = transform.position;
         if (!UnityEngine.AI.NavMesh.SamplePosition(position, out UnityEngine.AI.NavMeshHit hit,
@@ -99,7 +105,13 @@ public class CoverPoint : MonoBehaviour
         Vector3 closest = coverCollider.ClosestPoint(position);
         Vector3 flatDelta = position - closest;
         flatDelta.y = 0f;
-        float requiredClearance = Mathf.Max(0.15f, occupancyRadius * 0.5f);
+        float unitRadius = 0f;
+        if (unit != null)
+        {
+            Collider body = unit.GetComponent<Collider>() ?? unit.GetComponentInChildren<Collider>(true);
+            if (body != null) unitRadius = Mathf.Max(body.bounds.extents.x, body.bounds.extents.z);
+        }
+        float requiredClearance = Mathf.Max(0.15f, occupancyRadius * 0.5f, unitRadius + 0.12f);
         if (flatDelta.sqrMagnitude >= requiredClearance * requiredClearance) return true;
 
         Vector3 away = position - coverCollider.bounds.center;
