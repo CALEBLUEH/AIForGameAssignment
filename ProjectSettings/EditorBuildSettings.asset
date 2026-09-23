@@ -15,9 +15,12 @@ EditorBuildSettings:
     path: Assets/Scenes/LevelSelection.unity
     guid: 54750ade6a064404cb7613f6dd0369ed
   - enabled: 1
-    path: Assets/Scenes/Mission.unity
-    guid: 3c092a09d37fe34469d7b25dac92b016
+    path: Assets/Scenes/Sandbox_CharacterStates.unity
+    guid: 507b799f08b0b7042baeb66cac40cc67
   - enabled: 1
+    path: Assets/Scenes/Credits.unity
+    guid: 7c7d8a6ba3204b24096d81e748dbb023
+  - enabled: 0
     path: Assets/Scenes/Game Scene Ui.unity
     guid: ce33e1337ef53ee4eab67aea430b59b5
   - enabled: 1
