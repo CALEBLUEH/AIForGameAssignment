@@ -15,4 +15,9 @@ public class SceneButton : MonoBehaviour
 
         SceneTransitionService.LoadScene(sceneName);
     }
+
+    public void ExitApplication()
+    {
+        Application.Quit();
+    }
 }
