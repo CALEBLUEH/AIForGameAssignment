@@ -99,8 +99,16 @@ public static class SkillEffectsPlayModeSmoke
 
         enemyHealthBefore = enemy.CurrentHealth;
         Invoke(cast, director, kindType, "Airstrike", enemy.transform.position);
-        coverPoint = ally.transform.position + Vector3.right * 2.5f;
+        CombatUnit[] livingUnits = Object.FindObjectsByType<CombatUnit>(FindObjectsSortMode.None)
+            .Where(unit => !unit.IsDead && unit.gameObject.activeInHierarchy).ToArray();
+        coverPoint = NavMesh.CalculateTriangulation().vertices
+            .Where(vertex => livingUnits.All(unit => FlatDistance(vertex, unit.transform.position) > 10f))
+            .OrderBy(vertex => FlatDistance(vertex, ally.transform.position))
+            .First();
         Invoke(cast, director, kindType, "Cover", coverPoint);
+        // Also attempt an invalid landing directly on the character. It may be
+        // relocated or rejected/refunded, but it must never trap the unit.
+        Invoke(cast, director, kindType, "Cover", ally.transform.position);
 
         SkillTargetingOverlayUI overlay = Resources.FindObjectsOfTypeAll<SkillTargetingOverlayUI>().FirstOrDefault();
         if (overlay == null) throw new InvalidOperationException("Missing targeting overlay.");
@@ -122,21 +130,32 @@ public static class SkillEffectsPlayModeSmoke
             throw new InvalidOperationException("Airstrike missile did not damage its landing area.");
         if (ally == null || ally.AttackPower > attackBefore * 1.01f)
             throw new InvalidOperationException("Basic Buff did not expire after its configured duration.");
-        GameObject cover = Object.FindObjectsByType<GameObject>(FindObjectsSortMode.None)
-            .FirstOrDefault(item => item.name == "Placed Cover" && Vector3.Distance(item.transform.position, coverPoint) < 1f);
+        GameObject[] placedCovers = Object.FindObjectsByType<GameObject>(FindObjectsSortMode.None)
+            .Where(item => item.name == "Placed Cover").ToArray();
+        GameObject cover = placedCovers.FirstOrDefault();
         if (cover == null || cover.GetComponent<NavMeshObstacle>() == null ||
             cover.GetComponent<TacticalCoverObstacle>() == null || cover.GetComponent<DestructibleCover>() == null ||
             cover.GetComponentInChildren<CoverHealthHUD>(true) == null ||
             cover.GetComponentsInChildren<CoverPoint>().Length != 2)
             throw new InvalidOperationException("Dropped cover was not configured as a carved destructible obstacle with HUD and two opposing cover points.");
-        Debug.Log("SKILL_EFFECTS_PLAYMODE_OK basic Heal/Buff/Airstrike/Cover, FIFO inclusion, timed buff expiry, tactical dropped cover, and undimmed target cutout passed.");
+        Collider allyBody = ally.GetComponent<Collider>() ?? ally.GetComponentInChildren<Collider>(true);
+        foreach (GameObject placedCover in placedCovers)
+        {
+            Bounds coverBounds = placedCover.GetComponentsInChildren<Collider>(true)
+                .Where(collider => collider.enabled && !collider.isTrigger)
+                .Select(collider => collider.bounds)
+                .Aggregate((combined, next) => { combined.Encapsulate(next); return combined; });
+            if (allyBody != null && coverBounds.Intersects(allyBody.bounds))
+                throw new InvalidOperationException("Dropped cover still intersects the character at its requested landing point.");
+        }
+        Debug.Log("SKILL_EFFECTS_PLAYMODE_OK basic Heal/Buff/Airstrike/Cover, occupied-point landing clearance, FIFO inclusion, timed buff expiry, tactical dropped cover, and undimmed target cutout passed.");
         SessionState.SetInt(PhaseKey, 99);
         EditorApplication.isPlaying = false;
     }
 
     private static void Invoke(MethodInfo method, BattleDirector director, Type kindType, string kind, Vector3 point)
     {
-        object[] arguments = { Enum.Parse(kindType, kind), point, Vector3.zero };
+        object[] arguments = { Enum.Parse(kindType, kind), point, Vector3.zero, null };
         bool result = (bool)method.Invoke(director, arguments);
         if (!result) throw new InvalidOperationException("Basic " + kind + " was rejected.");
     }
@@ -146,5 +165,11 @@ public static class SkillEffectsPlayModeSmoke
         FieldInfo info = type.GetField(field, BindingFlags.Instance | BindingFlags.NonPublic);
         if (info == null) throw new MissingFieldException(type.Name, field);
         info.SetValue(target, value);
+    }
+
+    private static float FlatDistance(Vector3 a, Vector3 b)
+    {
+        a.y = b.y = 0f;
+        return Vector3.Distance(a, b);
     }
 }

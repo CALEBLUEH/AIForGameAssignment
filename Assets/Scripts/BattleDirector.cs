@@ -1094,7 +1094,10 @@ public class BattleDirector : MonoBehaviour
             if (facing.sqrMagnitude < 0.01f) facing = Vector3.forward;
             Quaternion rotation = Quaternion.LookRotation(facing.normalized);
             SkillVfx.DropModel(coverObstaclePrefab, pointer, Vector3.up * skillDropHeight,
-                coverDropDuration, 1f, false, landed => ConfigurePlacedCover(landed, pointer, rotation));
+                coverDropDuration, 1f, false, landed =>
+                {
+                    if (!ConfigurePlacedCover(landed, pointer, rotation)) RefundUniversal(coverCost);
+                });
             return true;
         }
         return false;
@@ -1115,9 +1118,9 @@ public class BattleDirector : MonoBehaviour
         return bestDistance <= basicTargetSnapRadius ? best : null;
     }
 
-    private void ConfigurePlacedCover(GameObject cover, Vector3 position, Quaternion rotation)
+    private bool ConfigurePlacedCover(GameObject cover, Vector3 position, Quaternion rotation)
     {
-        if (cover == null) return;
+        if (cover == null) return false;
         cover.name = "Placed Cover";
         cover.transform.SetPositionAndRotation(position, rotation);
         cover.layer = 8;
@@ -1136,6 +1139,11 @@ public class BattleDirector : MonoBehaviour
             physicalCollider = box;
         }
         foreach (Collider collider in cover.GetComponentsInChildren<Collider>(true)) collider.enabled = true;
+        if (!TryResolvePlacedCoverClearance(cover, position, out position))
+        {
+            Destroy(cover);
+            return false;
+        }
 
         NavMeshObstacle navObstacle = cover.GetComponent<NavMeshObstacle>();
         if (navObstacle == null) navObstacle = cover.AddComponent<NavMeshObstacle>();
@@ -1172,6 +1180,61 @@ public class BattleDirector : MonoBehaviour
             hud.enabled = true;
         }
         SkillVfx.SpawnBurst(position + Vector3.up * 0.2f, new Color(0.3f, 0.75f, 1f), 0.3f, 28, 0.75f);
+        return true;
+    }
+
+    private static bool TryResolvePlacedCoverClearance(GameObject cover, Vector3 requestedPosition,
+        out Vector3 resolvedPosition)
+    {
+        const float padding = 0.12f;
+        const float maximumDisplacement = 8f;
+        resolvedPosition = requestedPosition;
+
+        for (float radius = 0f; radius <= maximumDisplacement; radius += 0.5f)
+        {
+            int samples = radius <= 0f ? 1 : 16;
+            for (int sample = 0; sample < samples; sample++)
+            {
+                float angle = samples == 1 ? 0f : sample * (360f / samples) * Mathf.Deg2Rad;
+                Vector3 candidate = requestedPosition + new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * radius;
+                if (!NavMesh.SamplePosition(candidate, out NavMeshHit hit, 1.5f, NavMesh.AllAreas)) continue;
+                candidate.y = hit.position.y;
+                cover.transform.position = candidate;
+                if (!TryCalculateColliderBounds(cover, out Bounds coverBounds)) return false;
+                coverBounds.Expand(new Vector3(padding * 2f, 0f, padding * 2f));
+                if (!IntersectsLivingUnit(coverBounds))
+                {
+                    resolvedPosition = candidate;
+                    return true;
+                }
+            }
+        }
+        cover.transform.position = requestedPosition;
+        return false;
+    }
+
+    private static bool IntersectsLivingUnit(Bounds coverBounds)
+    {
+        foreach (CombatUnit unit in FindObjectsByType<CombatUnit>(FindObjectsSortMode.None))
+        {
+            if (unit == null || unit.IsDead || !unit.gameObject.activeInHierarchy) continue;
+            Collider body = unit.GetComponent<Collider>() ?? unit.GetComponentInChildren<Collider>(true);
+            if (body != null && body.enabled && coverBounds.Intersects(body.bounds)) return true;
+        }
+        return false;
+    }
+
+    private static bool TryCalculateColliderBounds(GameObject root, out Bounds bounds)
+    {
+        bounds = default;
+        bool found = false;
+        foreach (Collider collider in root.GetComponentsInChildren<Collider>(true))
+        {
+            if (collider == null || !collider.enabled || collider.isTrigger) continue;
+            if (!found) { bounds = collider.bounds; found = true; }
+            else bounds.Encapsulate(collider.bounds);
+        }
+        return found;
     }
 
     private static Bounds CalculateRendererBounds(GameObject root)
@@ -1448,7 +1511,7 @@ public class BattleDirector : MonoBehaviour
     {
         Time.timeScale = 1f;
         GameProgress.PrepareLevelSelection(levelNumber);
-        UnityEngine.SceneManagement.SceneManager.LoadScene(GameProgress.PreparationSceneName);
+        SceneTransitionService.LoadScene(GameProgress.PreparationSceneName);
     }
 
     private void CycleSpeed()
@@ -1483,6 +1546,7 @@ public class BattleDirector : MonoBehaviour
         GameProgress.LevelStar earnedStars = won
             ? GameProgress.CompleteLevel(levelNumber, playerDeaths, elapsed)
             : GameProgress.LevelStar.None;
+        if (won) SceneMusicDirector.PlayVictoryMusic();
         StartCoroutine(ShowResultAfterDelay(won, earnedStars));
     }
 
@@ -1521,14 +1585,13 @@ public class BattleDirector : MonoBehaviour
     private void RestartBattle()
     {
         Time.timeScale = 1f;
-        UnityEngine.SceneManagement.SceneManager.LoadScene(
-            UnityEngine.SceneManagement.SceneManager.GetActiveScene().buildIndex);
+        SceneTransitionService.ReloadActiveScene();
     }
 
     private void ReturnToLevelSelection()
     {
         Time.timeScale = 1f;
         if (!string.IsNullOrWhiteSpace(levelSelectionSceneName))
-            UnityEngine.SceneManagement.SceneManager.LoadScene(levelSelectionSceneName);
+            SceneTransitionService.LoadScene(levelSelectionSceneName);
     }
 }

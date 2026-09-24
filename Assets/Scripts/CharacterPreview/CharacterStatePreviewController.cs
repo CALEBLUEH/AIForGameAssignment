@@ -1,5 +1,6 @@
 using System;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.Events;
 using UnityEngine.UI;
 
@@ -37,9 +38,16 @@ public class CharacterStatePreviewController : MonoBehaviour
     private UnityAction[] stateActions = Array.Empty<UnityAction>();
     private int selectedCharacter;
     private PreviewState selectedState = PreviewState.Idle;
+    private bool rotatingCharacter;
+    private bool rotationDragStarted;
+    private Vector2 rotationPointerStart;
+    private Vector2 previousRotationPointer;
+    private const float RotationDegreesPerPixel = 0.35f;
+    private const float RotationDragThreshold = 6f;
 
     private void Awake()
     {
+        ResolveCoverPreview();
         BindButtons();
         SelectCharacter(0);
         SelectState((int)PreviewState.Idle);
@@ -51,6 +59,24 @@ public class CharacterStatePreviewController : MonoBehaviour
         if (Input.GetKeyDown(KeyCode.Alpha2)) SelectCharacter(1);
         if (Input.GetKeyDown(KeyCode.W) || Input.GetKeyDown(KeyCode.UpArrow)) CycleState(-1);
         if (Input.GetKeyDown(KeyCode.S) || Input.GetKeyDown(KeyCode.DownArrow)) CycleState(1);
+
+        if (Input.GetMouseButtonDown(0) && !IsPointerOverUI())
+        {
+            rotatingCharacter = true;
+            rotationDragStarted = false;
+            rotationPointerStart = previousRotationPointer = Input.mousePosition;
+        }
+        if (rotatingCharacter && Input.GetMouseButton(0))
+        {
+            Vector2 pointer = Input.mousePosition;
+            if (!rotationDragStarted && (pointer - rotationPointerStart).sqrMagnitude >=
+                RotationDragThreshold * RotationDragThreshold)
+                rotationDragStarted = true;
+            if (rotationDragStarted)
+                RotateSelected(-(pointer.x - previousRotationPointer.x) * RotationDegreesPerPixel);
+            previousRotationPointer = pointer;
+        }
+        if (Input.GetMouseButtonUp(0)) rotatingCharacter = false;
     }
 
     private void OnDestroy()
@@ -83,10 +109,36 @@ public class CharacterStatePreviewController : MonoBehaviour
     public void SelectState(int stateIndex)
     {
         selectedState = (PreviewState)Mathf.Clamp(stateIndex, 0, Enum.GetValues(typeof(PreviewState)).Length - 1);
+        if (coverPreview == null) ResolveCoverPreview();
         if (coverPreview != null) coverPreview.SetActive(selectedState == PreviewState.Cover);
         PlaySelectedState();
         RefreshUI();
     }
+
+    public void RotateSelected(float degrees)
+    {
+        if (selectedCharacter < 0 || selectedCharacter >= characters.Length) return;
+        GameObject root = characters[selectedCharacter].root;
+        if (root == null) return;
+        root.transform.Rotate(0f, degrees, 0f, Space.World);
+        if (coverPreview == null) ResolveCoverPreview();
+        if (coverPreview != null)
+            coverPreview.transform.RotateAround(root.transform.position, Vector3.up, degrees);
+    }
+
+    private void ResolveCoverPreview()
+    {
+        if (coverPreview != null) return;
+        foreach (Transform candidate in FindObjectsByType<Transform>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+        {
+            if (candidate.gameObject.scene != gameObject.scene) continue;
+            if (!candidate.name.Equals("Cover State Preview", StringComparison.OrdinalIgnoreCase)) continue;
+            coverPreview = candidate.gameObject;
+            break;
+        }
+    }
+
+    private static bool IsPointerOverUI() => EventSystem.current != null && EventSystem.current.IsPointerOverGameObject();
 
     private void BindButtons()
     {
@@ -129,7 +181,7 @@ public class CharacterStatePreviewController : MonoBehaviour
         if (selectionText != null && characters.Length > 0)
         {
             selectionText.text = characters[selectedCharacter].displayName + "  •  " + selectedState +
-                "\n1 / 2 selects a model     W / S or ↑ / ↓ selects a state";
+                "\nDrag left / right to rotate     W / S or ↑ / ↓ selects a state";
         }
     }
 

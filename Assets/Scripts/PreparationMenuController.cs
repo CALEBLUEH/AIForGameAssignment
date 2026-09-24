@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
 public class PreparationMenuController : MonoBehaviour
@@ -44,7 +43,7 @@ public class PreparationMenuController : MonoBehaviour
             }
         }
         if (battleButton != null) battleButton.onClick.AddListener(StartBattle);
-        if (backButton != null) backButton.onClick.AddListener(() => SceneManager.LoadScene("LevelSelection"));
+        if (backButton != null) backButton.onClick.AddListener(() => SceneTransitionService.LoadScene("LevelSelection"));
         if (settingsButton != null) settingsButton.onClick.AddListener(() => settingsPanel.SetActive(true));
         if (closeSettingsButton != null) closeSettingsButton.onClick.AddListener(() => settingsPanel.SetActive(false));
         if (settingsPanel != null) settingsPanel.SetActive(false);
@@ -147,6 +146,6 @@ public class PreparationMenuController : MonoBehaviour
         var names = new List<string>();
         for (int i = 0; i < selected.Length; i++) if (selected[i]) names.Add(characterNames[i]);
         GameProgress.SetSelectedCharacters(names);
-        SceneManager.LoadScene(GameProgress.ConsumeBattleScene(battleSceneOverride));
+        SceneTransitionService.LoadScene(GameProgress.ConsumeBattleScene(battleSceneOverride));
     }
 }

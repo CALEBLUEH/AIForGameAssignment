@@ -1,5 +1,4 @@
 using UnityEngine;
-using UnityEngine.SceneManagement;
 
 public class SceneButton : MonoBehaviour
 {
@@ -14,6 +13,6 @@ public class SceneButton : MonoBehaviour
             return;
         }
 
-        SceneManager.LoadScene(sceneName);
+        SceneTransitionService.LoadScene(sceneName);
     }
 }

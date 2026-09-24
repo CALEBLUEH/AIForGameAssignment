@@ -53,10 +53,11 @@ public static class FinalGameplayIntegrationPlayModeSmoke
 
         try
         {
-            if (deadline <= 0d) deadline = EditorApplication.timeSinceStartup + 45d;
+            if (deadline <= 0d) deadline = EditorApplication.timeSinceStartup + 120d;
             if (EditorApplication.timeSinceStartup > deadline)
                 throw new TimeoutException("Final gameplay integration smoke timed out in phase " + phase + ".");
             if (EditorApplication.timeSinceStartup < earliestCheck) return;
+            if (SceneTransitionService.IsTransitioning) return;
 
             BattleDirector director = Object.FindFirstObjectByType<BattleDirector>();
             if (phase == 0)

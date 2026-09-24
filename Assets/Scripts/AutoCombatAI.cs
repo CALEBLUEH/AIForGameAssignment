@@ -1093,6 +1093,7 @@ public class AutoCombatAI : MonoBehaviour
 
         skillCasting = true;
         ClearPath();
+        SceneMusicDirector.PlaySkillVoice(role);
         StartCoroutine(PerformCharacterSkill(origin, direction, point, target));
         characterSkillReadyAt = Time.time + characterSkillCooldown;
         BattleDirector.Instance.NotifyCharacterSkillUsed(this);

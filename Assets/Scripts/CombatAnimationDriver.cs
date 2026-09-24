@@ -9,13 +9,19 @@ public sealed class CombatAnimationDriver : MonoBehaviour
     [SerializeField] private Animator characterAnimator;
 
     private int currentStateHash;
+    private Transform visualRoot;
+    private Collider bodyCollider;
+    private SkinnedMeshRenderer[] visualRenderers = Array.Empty<SkinnedMeshRenderer>();
+    private float appliedVisualLift;
+    private const float GroundTolerance = 0.015f;
+    private const float MaximumVisualLift = 0.8f;
 
     private void Awake()
     {
         if (combatAI == null) combatAI = GetComponent<AutoCombatAI>();
         if (combatUnit == null) combatUnit = GetComponent<CombatUnit>();
         if (characterAnimator == null) characterAnimator = GetComponentInChildren<Animator>(true);
-        if (characterAnimator != null) characterAnimator.applyRootMotion = false;
+        InitializeAnimatorPresentation();
         PlayState("Idle");
     }
 
@@ -30,7 +36,57 @@ public sealed class CombatAnimationDriver : MonoBehaviour
         combatAI = ai;
         combatUnit = unit;
         characterAnimator = animator;
-        if (characterAnimator != null) characterAnimator.applyRootMotion = false;
+        InitializeAnimatorPresentation();
+    }
+
+    private void LateUpdate()
+    {
+        if (characterAnimator == null || visualRoot == null || visualRoot == transform || bodyCollider == null) return;
+        if (!TryGetVisualSoleY(out float soleY)) return;
+
+        float error = bodyCollider.bounds.min.y - soleY;
+        float adjustment = 0f;
+        if (error > GroundTolerance)
+            adjustment = Mathf.Min(error, MaximumVisualLift - appliedVisualLift);
+        else if (error < -GroundTolerance && appliedVisualLift > 0f)
+            adjustment = -Mathf.Min(-error, appliedVisualLift);
+        if (Mathf.Abs(adjustment) <= 0.0001f) return;
+
+        visualRoot.position += Vector3.up * adjustment;
+        appliedVisualLift = Mathf.Clamp(appliedVisualLift + adjustment, 0f, MaximumVisualLift);
+    }
+
+    private void InitializeAnimatorPresentation()
+    {
+        if (characterAnimator == null) return;
+        characterAnimator.applyRootMotion = false;
+        visualRoot = characterAnimator.transform;
+        while (visualRoot.parent != null && visualRoot.parent != transform)
+            visualRoot = visualRoot.parent;
+        if (visualRoot == transform)
+        {
+            SkinnedMeshRenderer fallback = GetComponentInChildren<SkinnedMeshRenderer>(true);
+            if (fallback != null)
+            {
+                visualRoot = fallback.transform;
+                while (visualRoot.parent != null && visualRoot.parent != transform)
+                    visualRoot = visualRoot.parent;
+            }
+        }
+        bodyCollider = GetComponent<Collider>();
+        visualRenderers = visualRoot == null
+            ? Array.Empty<SkinnedMeshRenderer>()
+            : visualRoot.GetComponentsInChildren<SkinnedMeshRenderer>(true);
+        appliedVisualLift = 0f;
+    }
+
+    private bool TryGetVisualSoleY(out float soleY)
+    {
+        soleY = float.PositiveInfinity;
+        foreach (SkinnedMeshRenderer visual in visualRenderers)
+            if (visual != null && visual.enabled && visual.gameObject.activeInHierarchy)
+                soleY = Mathf.Min(soleY, visual.bounds.min.y);
+        return soleY < float.PositiveInfinity;
     }
 
     private string ResolveState()

@@ -1,5 +1,4 @@
 using UnityEngine;
-using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
 public class LevelSelectionController : MonoBehaviour
@@ -18,13 +17,24 @@ public class LevelSelectionController : MonoBehaviour
             levelCards[i].selectButton.onClick.AddListener(() => SelectLevel(level));
         }
 
-        Canvas canvas = FindFirstObjectByType<Canvas>();
+        Canvas canvas = FindSceneCanvas();
         if (canvas != null)
         {
             LevelSelectionResetUI resetUI = GetComponent<LevelSelectionResetUI>();
             if (resetUI == null) resetUI = gameObject.AddComponent<LevelSelectionResetUI>();
             resetUI.Initialize(canvas.transform, ResetStars);
         }
+    }
+
+    private Canvas FindSceneCanvas()
+    {
+        foreach (Canvas candidate in FindObjectsByType<Canvas>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+        {
+            if (candidate.gameObject.scene != gameObject.scene) continue;
+            if (candidate.renderMode == RenderMode.WorldSpace) continue;
+            return candidate;
+        }
+        return null;
     }
 
     public void RefreshCards()
@@ -46,6 +56,6 @@ public class LevelSelectionController : MonoBehaviour
     {
         if (!GameProgress.IsLevelUnlocked(level)) return;
         GameProgress.PrepareLevelSelection(level);
-        SceneManager.LoadScene(GameProgress.PreparationSceneName);
+        SceneTransitionService.LoadScene(GameProgress.PreparationSceneName);
     }
 }

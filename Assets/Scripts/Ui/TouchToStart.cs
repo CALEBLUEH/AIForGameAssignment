@@ -1,5 +1,4 @@
 using UnityEngine;
-using UnityEngine.SceneManagement;
 
 public class TouchToStart : MonoBehaviour
 {
@@ -23,6 +22,6 @@ public class TouchToStart : MonoBehaviour
 
     void LoadLobby()
     {
-        SceneManager.LoadScene(lobbySceneName);
+        SceneTransitionService.LoadScene(lobbySceneName);
     }
 }

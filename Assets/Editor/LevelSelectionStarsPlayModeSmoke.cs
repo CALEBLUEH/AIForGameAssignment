@@ -63,11 +63,16 @@ public static class LevelSelectionStarsPlayModeSmoke
             ValidateCard(controller.levelCards[1], true, true, false);
             ValidateCard(controller.levelCards[2], true, false, true);
 
-            Transform root = Object.FindFirstObjectByType<Canvas>().transform.Find("Runtime Star Reset Controls");
+            Canvas sceneCanvas = Object.FindObjectsByType<Canvas>(FindObjectsInactive.Include, FindObjectsSortMode.None)
+                .FirstOrDefault(candidate => candidate.gameObject.scene == controller.gameObject.scene &&
+                    candidate.renderMode != RenderMode.WorldSpace);
+            Transform root = sceneCanvas?.transform.Find("Runtime Star Reset Controls");
             Button reset = root?.Find("Reset Stars")?.GetComponent<Button>();
             Transform confirmation = root?.Find("Reset Confirmation");
             if (reset == null || confirmation == null)
                 throw new InvalidOperationException("Reset Stars button or confirmation panel was not created.");
+            if (root.gameObject.scene != controller.gameObject.scene)
+                throw new InvalidOperationException("Reset Stars was parented to a persistent transition canvas.");
 
             reset.onClick.Invoke();
             if (!confirmation.gameObject.activeSelf)
@@ -82,7 +87,7 @@ public static class LevelSelectionStarsPlayModeSmoke
                 throw new InvalidOperationException("Yes did not clear every earned star.");
             foreach (LevelCardUI card in controller.levelCards) ValidateCard(card, false, false, false);
 
-            Debug.Log("LEVEL_SELECTION_STARS_PLAYMODE_OK independent completion/no-defeat/under-two-minute sprites and confirmed Reset Stars UI passed.");
+            Debug.Log("LEVEL_SELECTION_STARS_PLAYMODE_OK independent completion/no-defeat/under-two-minute sprites and scene-local bottom-right Reset Stars UI passed.");
             RestoreProgress();
             SessionState.SetInt(PhaseKey, 99);
             EditorApplication.isPlaying = false;
