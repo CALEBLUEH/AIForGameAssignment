@@ -76,11 +76,11 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 3571022773601004427, guid: f706a552ec8bd844a852047d483b9868, type: 3}
       propertyPath: maxHealth
-      value: 160
+      value: 100
       objectReference: {fileID: 0}
     - target: {fileID: 3571022773601004427, guid: f706a552ec8bd844a852047d483b9868, type: 3}
       propertyPath: attackPower
-      value: 10
+      value: 30
       objectReference: {fileID: 0}
     - target: {fileID: 3571022773601004427, guid: f706a552ec8bd844a852047d483b9868, type: 3}
       propertyPath: attackRange
@@ -100,7 +100,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 3614039678339281282, guid: f706a552ec8bd844a852047d483b9868, type: 3}
       propertyPath: movementSpeed
-      value: 9
+      value: 12
       objectReference: {fileID: 0}
     - target: {fileID: 3614039678339281282, guid: f706a552ec8bd844a852047d483b9868, type: 3}
       propertyPath: enemyCanUseCover

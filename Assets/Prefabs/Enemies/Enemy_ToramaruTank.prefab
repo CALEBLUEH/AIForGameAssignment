@@ -29,6 +29,10 @@ PrefabInstance:
       value: 13
       objectReference: {fileID: 0}
     - target: {fileID: 3571022773601004427, guid: f706a552ec8bd844a852047d483b9868, type: 3}
+      propertyPath: attackRange
+      value: 50
+      objectReference: {fileID: 0}
+    - target: {fileID: 3571022773601004427, guid: f706a552ec8bd844a852047d483b9868, type: 3}
       propertyPath: applyCharacterDataOnAwake
       value: 0
       objectReference: {fileID: 0}

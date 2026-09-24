@@ -7140,7 +7140,7 @@ MonoBehaviour:
     m_HorizontalOverflow: 0
     m_VerticalOverflow: 0
     m_LineSpacing: 1
-  m_Text: "Right-drag to inspect the squad  \u2022  Scroll to zoom"
+  m_Text: Right-drag to inspect the squad
 --- !u!222 &2071789404
 CanvasRenderer:
   m_ObjectHideFlags: 0

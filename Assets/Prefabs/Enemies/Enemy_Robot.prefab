@@ -18,11 +18,15 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 3571022773601004427, guid: f706a552ec8bd844a852047d483b9868, type: 3}
       propertyPath: maxHealth
-      value: 180
+      value: 500
       objectReference: {fileID: 0}
     - target: {fileID: 3571022773601004427, guid: f706a552ec8bd844a852047d483b9868, type: 3}
       propertyPath: attackPower
-      value: 7.5
+      value: 40
+      objectReference: {fileID: 0}
+    - target: {fileID: 3571022773601004427, guid: f706a552ec8bd844a852047d483b9868, type: 3}
+      propertyPath: attackRange
+      value: 50
       objectReference: {fileID: 0}
     - target: {fileID: 3571022773601004427, guid: f706a552ec8bd844a852047d483b9868, type: 3}
       propertyPath: applyCharacterDataOnAwake

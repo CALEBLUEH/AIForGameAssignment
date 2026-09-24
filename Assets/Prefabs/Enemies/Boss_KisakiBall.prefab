@@ -88,11 +88,15 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 3571022773601004427, guid: f706a552ec8bd844a852047d483b9868, type: 3}
       propertyPath: maxHealth
-      value: 900
+      value: 1000
       objectReference: {fileID: 0}
     - target: {fileID: 3571022773601004427, guid: f706a552ec8bd844a852047d483b9868, type: 3}
       propertyPath: attackPower
-      value: 34
+      value: 100
+      objectReference: {fileID: 0}
+    - target: {fileID: 3571022773601004427, guid: f706a552ec8bd844a852047d483b9868, type: 3}
+      propertyPath: attackRange
+      value: 30
       objectReference: {fileID: 0}
     - target: {fileID: 3571022773601004427, guid: f706a552ec8bd844a852047d483b9868, type: 3}
       propertyPath: attackSpeed
