@@ -23,7 +23,7 @@ EditorBuildSettings:
   - enabled: 0
     path: Assets/Scenes/Game Scene Ui.unity
     guid: ce33e1337ef53ee4eab67aea430b59b5
-  - enabled: 1
+  - enabled: 0
     path: Assets/Scenes/Preparation.unity
     guid: 36ff8f55c0ee409409c4a84570a64a92
   - enabled: 0
