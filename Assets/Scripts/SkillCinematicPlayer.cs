@@ -30,6 +30,13 @@ public sealed class SkillCinematicPlayer : MonoBehaviour
     [SerializeField] private VideoClip momoiClip;
     [SerializeField] private VideoClip hinaClip;
 
+    [Header("Web Video Sources")]
+    [SerializeField] private string yuukaWebVideo = "RedDissertation/yuuka.mp4";
+    [SerializeField] private string ayaneWebVideo = "RedDissertation/ayane.mp4";
+    [SerializeField] private string mikaWebVideo = "RedDissertation/mika.mp4";
+    [SerializeField] private string momoiWebVideo = "RedDissertation/momoi.mp4";
+    [SerializeField] private string hinaWebVideo = "RedDissertation/hina.mp4";
+
     private Material runtimeWipeMaterial;
     private bool playbackFinished, playbackFailed, sequenceRunning;
     private float previousTimeScale = 1f;
@@ -54,8 +61,13 @@ public sealed class SkillCinematicPlayer : MonoBehaviour
     public IEnumerator Play(AutoCombatAI.CombatRole role)
     {
         if (!SkillVideosEnabled) yield break;
+#if UNITY_WEBGL && !UNITY_EDITOR
+        string webFile = WebVideoFor(role);
+        if (string.IsNullOrEmpty(webFile) || videoPlayer == null || videoImage == null || Application.isBatchMode) yield break;
+#else
         VideoClip clip = ClipFor(role);
         if (clip == null || videoPlayer == null || videoImage == null || Application.isBatchMode) yield break;
+#endif
         while (sequenceRunning) yield return null;
 
         // Manual casts begin while the targeting slow-motion is still active. Wait until
@@ -70,7 +82,14 @@ public sealed class SkillCinematicPlayer : MonoBehaviour
         SetWipe(0f, false);
 
         videoPlayer.Stop();
+#if UNITY_WEBGL && !UNITY_EDITOR
+        videoPlayer.clip = null;
+        videoPlayer.source = VideoSource.Url;
+        videoPlayer.url = Application.streamingAssetsPath.TrimEnd('/') + "/" + webFile;
+#else
+        videoPlayer.source = VideoSource.VideoClip;
         videoPlayer.clip = clip;
+#endif
         videoPlayer.isLooping = false;
         videoPlayer.renderMode = VideoRenderMode.APIOnly;
         videoPlayer.timeUpdateMode = VideoTimeUpdateMode.UnscaledGameTime;
@@ -137,6 +156,33 @@ public sealed class SkillCinematicPlayer : MonoBehaviour
             default: return null;
         }
     }
+
+    private string WebVideoFor(AutoCombatAI.CombatRole role)
+    {
+        switch (role)
+        {
+            case AutoCombatAI.CombatRole.YuukaTank: return yuukaWebVideo;
+            case AutoCombatAI.CombatRole.AyaneHealer: return ayaneWebVideo;
+            case AutoCombatAI.CombatRole.MikaSingleTarget: return mikaWebVideo;
+            case AutoCombatAI.CombatRole.MomoiLowCostAOE: return momoiWebVideo;
+            case AutoCombatAI.CombatRole.HinaHighCostAOE: return hinaWebVideo;
+            default: return null;
+        }
+    }
+
+#if UNITY_EDITOR
+    // Only called on Unity's temporary Web build scene. Editor clip assignments stay authored.
+    public void PrepareWebBuild()
+    {
+        yuukaClip = ayaneClip = mikaClip = momoiClip = hinaClip = null;
+        if (videoPlayer != null)
+        {
+            videoPlayer.playOnAwake = false;
+            videoPlayer.clip = null;
+            videoPlayer.source = VideoSource.Url;
+        }
+    }
+#endif
 
     private void SetWipe(float progress, bool exiting)
     {

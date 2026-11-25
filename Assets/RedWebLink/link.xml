@@ -1,0 +1,7 @@
+<linker>
+  <!-- CreatePrimitive(Sphere) creates its collider inside the engine. Keep it
+       even though the authored projectile/shield code removes the collider. -->
+  <assembly fullname="UnityEngine.PhysicsModule">
+    <type fullname="UnityEngine.SphereCollider" preserve="all" />
+  </assembly>
+</linker>
